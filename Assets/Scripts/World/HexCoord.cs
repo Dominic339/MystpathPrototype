@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using UnityEngine;
 
 namespace Mystpath
@@ -89,5 +90,51 @@ namespace Mystpath
         public static bool operator !=(HexCoord a, HexCoord b) => !a.Equals(b);
         public static HexCoord operator +(HexCoord a, HexCoord b) => new HexCoord(a.Q + b.Q, a.R + b.R);
         public static HexCoord operator -(HexCoord a, HexCoord b) => new HexCoord(a.Q - b.Q, a.R - b.R);
+
+        // --- Range & Ring Utilities ---
+
+        /// <summary>
+        /// Returns all hex coordinates within <paramref name="radius"/> steps of <paramref name="center"/>,
+        /// including the center itself. Uses cube-coordinate range iteration for correctness.
+        /// Returned order is deterministic (Q outer, R inner within each Q slice).
+        /// </summary>
+        public static List<HexCoord> GetHexesInRange(HexCoord center, int radius)
+        {
+            var result = new List<HexCoord>((2 * radius + 1) * (2 * radius + 1));
+            for (int dq = -radius; dq <= radius; dq++)
+            {
+                int rMin = Mathf.Max(-radius, -dq - radius);
+                int rMax = Mathf.Min( radius, -dq + radius);
+                for (int dr = rMin; dr <= rMax; dr++)
+                    result.Add(new HexCoord(center.Q + dq, center.R + dr));
+            }
+            return result;
+        }
+
+        /// <summary>
+        /// Returns all hex coordinates at exactly <paramref name="radius"/> steps from
+        /// <paramref name="center"/> — the ring boundary, not the filled disc.
+        /// Returns a single-element list containing <paramref name="center"/> when radius is 0.
+        /// </summary>
+        public static List<HexCoord> GetRing(HexCoord center, int radius)
+        {
+            if (radius == 0)
+                return new List<HexCoord> { center };
+
+            var result = new List<HexCoord>(6 * radius);
+
+            // Walk around the ring starting from the "lower-left" direction.
+            // Scale direction 4 by radius to get the starting hex.
+            HexCoord current = center + new HexCoord(_directions[4].Q * radius, _directions[4].R * radius);
+            for (int side = 0; side < 6; side++)
+            {
+                for (int step = 0; step < radius; step++)
+                {
+                    result.Add(current);
+                    current = current.GetNeighbor(side);
+                }
+            }
+            return result;
+        }
     }
 }
