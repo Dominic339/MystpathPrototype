@@ -1,3 +1,4 @@
+using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 
@@ -29,6 +30,21 @@ namespace Mystpath
     ///   All spawned props live under a "PropsRoot" child of this GameObject,
     ///   with one sub-container per active biome (e.g., PropsRoot/Forest, PropsRoot/Desert).
     ///   This keeps the hierarchy readable and makes clearing props fast.
+    ///
+    /// Orientation:
+    ///   Each prop receives a random yaw rotation composed with its prefab's authored base
+    ///   rotation. This preserves any FBX import axis-correction rotations baked into the
+    ///   prefab root (common with Blender-exported assets), so props always stand upright
+    ///   regardless of how the original model was oriented in the source DCC tool.
+    ///
+    /// Scale / readability:
+    ///   Use <see cref="_globalScaleMultiplier"/> to increase all prop sizes for a
+    ///   zoomed-out management camera without editing every BiomePropSet entry individually.
+    ///
+    /// Large-world performance:
+    ///   Spawning is batched across multiple frames (controlled by <see cref="_spawnBatchSize"/>)
+    ///   so the game remains responsive during world load. Use <see cref="_maxPropsTotal"/>
+    ///   to hard-cap the prop count on very large (>300×300) worlds.
     ///
     /// Future work:
     ///   TODO: Add GPU instancing / batching for large worlds (>200×200 hexes).
@@ -72,6 +88,28 @@ namespace Mystpath
                  "1.0 = use BiomePropSet values as-is.")]
         [SerializeField, Range(0f, 2f)] private float _globalDensityMultiplier = 1f;
 
+        [Header("Scale & Readability")]
+        [Tooltip("Global scale multiplier applied on top of every per-entry scale range. " +
+                 "Increase for readability from a zoomed-out management camera — try 2–4. " +
+                 "Does not alter BiomePropSet assets; safe to tweak freely at runtime. " +
+                 "1.0 = use BiomePropEntry.MinScale / MaxScale values as-is.")]
+        [SerializeField, Range(0.1f, 10f)] private float _globalScaleMultiplier = 2f;
+
+        [Header("Large-World Performance")]
+        [Tooltip("Hard cap on the total number of spawned props across the whole world. " +
+                 "0 = no cap (suitable for worlds up to ~200×200 hexes). " +
+                 "Set 50 000–100 000 for worlds above 300×300 to prevent memory pressure. " +
+                 "Props are spawned in cell-iteration order, so the cap naturally biases " +
+                 "toward the cells iterated first (no spatial preference).")]
+        [SerializeField] private int _maxPropsTotal = 0;
+
+        [Tooltip("Number of props instantiated per frame during the spawn pass. " +
+                 "Lower values keep the game responsive during world load " +
+                 "(world is visible and interactive while props stream in). " +
+                 "Higher values finish spawning faster at the cost of frame spikes. " +
+                 "500 is a good balance for most hardware.")]
+        [SerializeField, Range(50, 2000)] private int _spawnBatchSize = 500;
+
         // =====================================================================
         // Private State
         // =====================================================================
@@ -91,13 +129,13 @@ namespace Mystpath
         private readonly Dictionary<string, Transform> _containers =
             new Dictionary<string, Transform>();
 
-        // Cached world seed — set when SpawnAllProps() runs so CellHash is correct.
+        // Cached world seed — set when the spawn coroutine starts so CellHash is correct.
         private int _worldSeed;
 
-        // Re-entrant call guard: prevents a second SpawnAllProps() from starting
-        // while a previous one is still running (can happen if events fire unexpectedly
-        // during the synchronous generation chain on debug regeneration).
-        private bool _isSpawning;
+        // Handle to the active spawn coroutine, or null if spawning is not in progress.
+        // Used by SpawnAllProps() to cancel any in-flight pass before starting a new one,
+        // and by OnDestroy() to stop the coroutine cleanly when the component is removed.
+        private Coroutine _spawnCoroutine;
 
         // Reusable snapshot list — avoids allocating a new list on every spawn.
         // Populated with a stable copy of GetAllCells() before iteration so that
@@ -166,6 +204,13 @@ namespace Mystpath
         {
             if (_terrainBuilder != null)
                 _terrainBuilder.OnTerrainBuilt -= HandleTerrainBuilt;
+
+            // Stop any in-progress spawn coroutine to avoid callbacks after destruction.
+            if (_spawnCoroutine != null)
+            {
+                StopCoroutine(_spawnCoroutine);
+                _spawnCoroutine = null;
+            }
         }
 
         // =====================================================================
@@ -179,39 +224,34 @@ namespace Mystpath
         // =====================================================================
 
         /// <summary>
-        /// Destroys all existing props and respawns the full world's props from
-        /// the current HexGrid biome data and configured BiomePropSets.
+        /// Cancels any in-progress spawn pass, destroys existing props, and starts a
+        /// fresh batched spawn pass spread across multiple frames.
         ///
         /// Called automatically when the terrain is built or rebuilt. Safe to call
         /// manually, e.g., after changing BiomePropSet assets in a debug context.
-        /// Re-entrant calls are silently dropped — only one spawn pass runs at a time.
+        /// If a previous spawn is in progress it is cancelled and restarted cleanly.
         /// </summary>
         public void SpawnAllProps()
         {
-            if (_isSpawning)
-            {
-                Debug.LogWarning("[WorldPropSpawner] SpawnAllProps re-entrant call ignored.");
-                return;
-            }
-
             if (_hexGrid == null)
             {
                 Debug.LogError("[WorldPropSpawner] HexGrid not found. Prop spawning aborted.");
                 return;
             }
 
-            _isSpawning = true;
-            try
+            // Cancel any in-flight spawn coroutine before starting a new one.
+            // This handles world regeneration (debug R/N) cleanly: the old pass stops
+            // immediately rather than continuing to place props from the previous world.
+            if (_spawnCoroutine != null)
             {
-                SpawnAllPropsInternal();
+                StopCoroutine(_spawnCoroutine);
+                _spawnCoroutine = null;
             }
-            finally
-            {
-                _isSpawning = false;
-            }
+
+            _spawnCoroutine = StartCoroutine(SpawnAllPropsCoroutine());
         }
 
-        /// <summary>Destroys all spawned prop GameObjects. Called before each respawn.</summary>
+        /// <summary>Destroys all spawned prop GameObjects immediately.</summary>
         public void ClearAllProps()
         {
             _containers.Clear();
@@ -224,10 +264,21 @@ namespace Mystpath
         }
 
         // =====================================================================
-        // Internal Spawn
+        // Internal Spawn Coroutine
         // =====================================================================
 
-        private void SpawnAllPropsInternal()
+        /// <summary>
+        /// Core spawn pass, distributed across multiple frames via yield.
+        ///
+        /// Each iteration of the outer foreach processes one hex cell synchronously.
+        /// After every <see cref="_spawnBatchSize"/> Instantiate calls the coroutine
+        /// yields a frame, keeping the game responsive and the editor from freezing
+        /// during world load — particularly important on large (>200×200) worlds.
+        ///
+        /// The <see cref="_maxPropsTotal"/> cap stops the pass early on very large
+        /// worlds where spawning every cell would exceed memory budgets.
+        /// </summary>
+        private IEnumerator SpawnAllPropsCoroutine()
         {
             ClearAllProps();
 
@@ -241,7 +292,7 @@ namespace Mystpath
 
             // Take a stable snapshot of the cell collection before iterating.
             // This prevents any potential InvalidOperationException if the HexGrid
-            // dictionary is modified during the synchronous world-generation event chain.
+            // dictionary is modified during the event chain.
             _cellsSnapshot.Clear();
             foreach (HexCell c in _hexGrid.GetAllCells())
             {
@@ -250,31 +301,48 @@ namespace Mystpath
             }
 
             int totalSpawned = 0;
+            int instantiatedThisFrame = 0;
 
             foreach (HexCell cell in _cellsSnapshot)
             {
                 // Never place surface props on water cells.
                 if (cell.IsWater) continue;
 
+                // Hard prop cap — stop when the world limit is reached.
+                if (_maxPropsTotal > 0 && totalSpawned >= _maxPropsTotal) break;
+
                 // Primary biome set.
                 if (_setByBiome.TryGetValue(cell.Biome, out BiomePropSet primarySet))
                 {
-                    // Skip shore cells if this set opts out of shore spawning.
                     if (!cell.IsShore || primarySet.SpawnOnShoreCells)
-                        totalSpawned += SpawnPropsForCell(cell, primarySet);
+                        totalSpawned += SpawnPropsForCell(cell, primarySet,
+                                                         ref instantiatedThisFrame);
                 }
 
                 // Shore-specific sets applied on top for shore cells.
                 if (cell.IsShore)
                 {
                     foreach (BiomePropSet shoreSet in _shoreSets)
-                        totalSpawned += SpawnPropsForCell(cell, shoreSet);
+                        totalSpawned += SpawnPropsForCell(cell, shoreSet,
+                                                         ref instantiatedThisFrame);
+                }
+
+                // Yield to the engine after each batch of instantiations.
+                // This keeps frame time bounded even on 500×500 worlds.
+                if (instantiatedThisFrame >= _spawnBatchSize)
+                {
+                    instantiatedThisFrame = 0;
+                    yield return null;
                 }
             }
 
+            _spawnCoroutine = null;
+
             Debug.Log($"[WorldPropSpawner] Spawned {totalSpawned} props across " +
                       $"{_cellsSnapshot.Count} land cells " +
-                      $"(seed={_worldSeed}, globalDensity={_globalDensityMultiplier:F2}).");
+                      $"(seed={_worldSeed}, density={_globalDensityMultiplier:F2}, " +
+                      $"scale×{_globalScaleMultiplier:F2}" +
+                      (_maxPropsTotal > 0 ? $", cap={_maxPropsTotal}" : "") + ").");
         }
 
         // =====================================================================
@@ -290,11 +358,24 @@ namespace Mystpath
         ///   1 — spawn chance roll (entry × set × global multipliers)
         ///   2 — position angle within the hex
         ///   3 — position radius within the hex
-        ///   4 — scale lerp
-        ///   5 — Y-axis rotation
+        ///   4 — scale lerp (entry range × global scale multiplier)
+        ///   5 — Y-axis rotation (yaw only; prop stays upright)
+        ///
+        /// Orientation contract:
+        ///   The random yaw is COMPOSED with the prefab's authored root rotation rather
+        ///   than replacing it. This preserves any FBX import axis-correction transforms
+        ///   baked into the prefab root (e.g., the –90 ° X rotation Unity's FBX importer
+        ///   adds when the source file uses Z-up). Without this, explicitly passing a
+        ///   world rotation to Instantiate would silently discard the correction and
+        ///   cause props to appear sideways or flat on the terrain.
         /// </summary>
+        /// <param name="instantiatedThisFrame">
+        /// Running count of props instantiated in the current frame batch.
+        /// Incremented by this method; caller resets to 0 and yields on threshold.
+        /// </param>
         /// <returns>Number of props actually spawned for this cell/set combination.</returns>
-        private int SpawnPropsForCell(HexCell cell, BiomePropSet set)
+        private int SpawnPropsForCell(HexCell cell, BiomePropSet set,
+                                      ref int instantiatedThisFrame)
         {
             if (set == null) return 0;
             if (set.Entries == null || set.Entries.Count == 0) return 0;
@@ -308,11 +389,9 @@ namespace Mystpath
             float innerRadius = _hexSize * 0.45f;
 
             // World-space Y at the cell center — used for all slots in this cell.
-            // A future improvement could raycast per-slot for per-position accuracy,
-            // but cell-center height is a good approximation for small jitter radii.
             float cellY = _terrainBuilder != null
                 ? cell.BaseElevation * _terrainBuilder.ElevationScale
-                : cell.BaseElevation * 5f; // fallback if no builder reference
+                : cell.BaseElevation * 5f;
 
             int spawned = 0;
 
@@ -336,37 +415,34 @@ namespace Mystpath
                 // --- Position jitter ---
                 float angle = CellHash(q, r, ch + 2) * 360f * Mathf.Deg2Rad;
                 float dist  = CellHash(q, r, ch + 3) * innerRadius;
-                float jitterX = Mathf.Cos(angle) * dist;
-                float jitterZ = Mathf.Sin(angle) * dist;
 
                 Vector3 spawnPos = new Vector3(
-                    cellWorldPos.x + jitterX,
+                    cellWorldPos.x + Mathf.Cos(angle) * dist,
                     cellY,
-                    cellWorldPos.z + jitterZ);
+                    cellWorldPos.z + Mathf.Sin(angle) * dist);
 
-                // --- Scale ---
+                // --- Scale (per-entry range × global readability multiplier) ---
                 float scaleT = CellHash(q, r, ch + 4);
-                // Guard against inverted min/max (misconfigured entry).
                 float minS = Mathf.Min(entry.MinScale, entry.MaxScale);
                 float maxS = Mathf.Max(entry.MinScale, entry.MaxScale);
                 float scale = Mathf.Lerp(minS, maxS, scaleT);
-                if (scale <= 0f) scale = 1f; // zero scale would make props invisible
+                if (scale <= 0f) scale = 1f;
+                scale *= _globalScaleMultiplier;
 
-                // --- Rotation ---
-                float rotY = CellHash(q, r, ch + 5) * 360f;
+                // --- Rotation (yaw-only, composed with prefab's authored base rotation) ---
+                // We compose the random yaw with the prefab root's world rotation instead
+                // of passing an absolute Euler. This preserves any import-correction rotation
+                // baked into the prefab (e.g., Blender FBX Z-up → Y-up) so props never
+                // appear sideways regardless of how the source model was authored.
+                float rotY      = CellHash(q, r, ch + 5) * 360f;
+                Quaternion yaw  = Quaternion.AngleAxis(rotY, Vector3.up);
+                Quaternion baseRot = entry.Prefab.transform.rotation; // prefab asset's world rot
 
                 // --- Instantiate ---
-                // Shore-specific sets go under a "Shore" container; biome sets go under
-                // a container named after the biome (e.g., "Forest", "Desert").
                 string containerName = set.IsShoreSpecificSet ? "Shore" : cell.Biome.ToString();
                 Transform parent = GetOrCreateContainer(containerName);
 
-                GameObject prop = Instantiate(
-                    entry.Prefab,
-                    spawnPos,
-                    Quaternion.Euler(0f, rotY, 0f),
-                    parent);
-
+                GameObject prop = Instantiate(entry.Prefab, spawnPos, yaw * baseRot, parent);
                 prop.transform.localScale = Vector3.one * scale;
 
                 // Apply yield override if the entry specifies one.
@@ -378,6 +454,7 @@ namespace Mystpath
                 }
 
                 spawned++;
+                instantiatedThisFrame++;
             }
 
             return spawned;
@@ -482,14 +559,11 @@ namespace Mystpath
         /// </summary>
         private static void WarnIfSetEffectivelyEmpty(BiomePropSet set)
         {
-            // A zero GlobalDensityMultiplier collapses effectiveChance to 0 for every
-            // entry regardless of their own SpawnChance values — nothing will ever spawn.
             if (set.GlobalDensityMultiplier <= 0f)
             {
                 Debug.LogWarning($"[WorldPropSpawner] BiomePropSet \"{set.name}\": " +
                                  "GlobalDensityMultiplier = 0 — nothing will spawn. " +
                                  "Run Tools/Mystpath/Validate and Fix Biome Prop Sets.");
-                // Don't return — check entries too for a complete picture.
             }
 
             if (set.Entries == null || set.Entries.Count == 0)
