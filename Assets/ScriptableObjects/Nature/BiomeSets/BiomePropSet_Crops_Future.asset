@@ -1,0 +1,38 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 998dbc16f80c93546b91456fd38a6fe3, type: 3}
+  m_Name: BiomePropSet_Crops_Future
+  m_EditorClassIdentifier: Assembly-CSharp::Mystpath.BiomePropSet
+  TargetBiome: 4
+  IsShoreSpecificSet: 0
+  Entries:
+  - Prefab: {fileID: 2685341317617817202, guid: 0bf7ac3644e2f3b4ca23a0641451e6c3, type: 3}
+    SpawnWeight: 0
+    SpawnChance: 0
+    MinScale: 0
+    MaxScale: 0
+    YieldOverride: 0
+  - Prefab: {fileID: 6490819424154030023, guid: 703a061b9b276e34eacff951bbaf7614, type: 3}
+    SpawnWeight: 0
+    SpawnChance: 0
+    MinScale: 0
+    MaxScale: 0
+    YieldOverride: 0
+  - Prefab: {fileID: 8440022657536422809, guid: 9311bf9a705b02649b083f74746fbed7, type: 3}
+    SpawnWeight: 0
+    SpawnChance: 0
+    MinScale: 0
+    MaxScale: 0
+    YieldOverride: 0
+  SlotsPerHex: 3
+  GlobalDensityMultiplier: 0.6
+  SpawnOnShoreCells: 1

@@ -1,0 +1,32 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 998dbc16f80c93546b91456fd38a6fe3, type: 3}
+  m_Name: BiomePropSet_Harvestable_Trees
+  m_EditorClassIdentifier: Assembly-CSharp::Mystpath.BiomePropSet
+  TargetBiome: 3
+  IsShoreSpecificSet: 0
+  Entries:
+  - Prefab: {fileID: 0}
+    SpawnWeight: 0
+    SpawnChance: 0
+    MinScale: 0
+    MaxScale: 0
+    YieldOverride: 0
+  - Prefab: {fileID: 0}
+    SpawnWeight: 0
+    SpawnChance: 0
+    MinScale: 0
+    MaxScale: 0
+    YieldOverride: 0
+  SlotsPerHex: 2
+  GlobalDensityMultiplier: 0.4
+  SpawnOnShoreCells: 1

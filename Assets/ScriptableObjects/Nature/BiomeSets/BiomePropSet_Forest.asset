@@ -1,0 +1,68 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 998dbc16f80c93546b91456fd38a6fe3, type: 3}
+  m_Name: BiomePropSet_Forest
+  m_EditorClassIdentifier: Assembly-CSharp::Mystpath.BiomePropSet
+  TargetBiome: 2
+  IsShoreSpecificSet: 0
+  Entries:
+  - Prefab: {fileID: 919132149155446097, guid: b03d6d4fef6a55641a3b6f6af035fb99, type: 3}
+    SpawnWeight: 0
+    SpawnChance: 0
+    MinScale: 0
+    MaxScale: 0
+    YieldOverride: 0
+  - Prefab: {fileID: 16601963950465671, guid: 61dddb839fbbda7409704f311394cc2c, type: 3}
+    SpawnWeight: 0
+    SpawnChance: 0
+    MinScale: 0
+    MaxScale: 0
+    YieldOverride: 0
+  - Prefab: {fileID: 3230840043077846102, guid: 1bcd41cb632b7b14c857cf958d1f444c, type: 3}
+    SpawnWeight: 0
+    SpawnChance: 0
+    MinScale: 0
+    MaxScale: 0
+    YieldOverride: 0
+  - Prefab: {fileID: 4469061691022338340, guid: eb144257123c9a149817917c1f645a26, type: 3}
+    SpawnWeight: 0
+    SpawnChance: 0
+    MinScale: 0
+    MaxScale: 0
+    YieldOverride: 0
+  - Prefab: {fileID: 2208545845815953117, guid: e7483aad5d0984248a7149c8f5f0b931, type: 3}
+    SpawnWeight: 0
+    SpawnChance: 0
+    MinScale: 0
+    MaxScale: 0
+    YieldOverride: 0
+  - Prefab: {fileID: 7812330478616201101, guid: bb9aae9292fc54a409a420c5a9b039cd, type: 3}
+    SpawnWeight: 0
+    SpawnChance: 0
+    MinScale: 0
+    MaxScale: 0
+    YieldOverride: 0
+  - Prefab: {fileID: 3859967099205734082, guid: 7f3d51e851fa4044ab8dabbb4047a8d4, type: 3}
+    SpawnWeight: 0
+    SpawnChance: 0
+    MinScale: 0
+    MaxScale: 0
+    YieldOverride: 0
+  - Prefab: {fileID: 8469309543478223368, guid: 425687f91cde8ff4289066f88c42fdca, type: 3}
+    SpawnWeight: 0
+    SpawnChance: 0
+    MinScale: 0
+    MaxScale: 0
+    YieldOverride: 0
+  SlotsPerHex: 6
+  GlobalDensityMultiplier: 1.2
+  SpawnOnShoreCells: 1

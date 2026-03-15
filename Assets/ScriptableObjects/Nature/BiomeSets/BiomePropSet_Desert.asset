@@ -1,0 +1,56 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 998dbc16f80c93546b91456fd38a6fe3, type: 3}
+  m_Name: BiomePropSet_Desert
+  m_EditorClassIdentifier: Assembly-CSharp::Mystpath.BiomePropSet
+  TargetBiome: 3
+  IsShoreSpecificSet: 0
+  Entries:
+  - Prefab: {fileID: 615444408329647343, guid: 1c7be029fa57ac948a19868a95a9a2f1, type: 3}
+    SpawnWeight: 0
+    SpawnChance: 0
+    MinScale: 0
+    MaxScale: 0
+    YieldOverride: 0
+  - Prefab: {fileID: 4312442476385041037, guid: dd2ae7c4ee1c83c448d1655e19b4a606, type: 3}
+    SpawnWeight: 0
+    SpawnChance: 0
+    MinScale: 0
+    MaxScale: 0
+    YieldOverride: 0
+  - Prefab: {fileID: 3817172812108177879, guid: 51d94f1f20f3b1742a674e0f4d903ee8, type: 3}
+    SpawnWeight: 0
+    SpawnChance: 0
+    MinScale: 0
+    MaxScale: 0
+    YieldOverride: 0
+  - Prefab: {fileID: 5705500398564091649, guid: 7dc9871469eb2b5429ed3113e56c5e83, type: 3}
+    SpawnWeight: 0
+    SpawnChance: 0
+    MinScale: 0
+    MaxScale: 0
+    YieldOverride: 0
+  - Prefab: {fileID: 8549509415095820123, guid: 819ee5f3096597d4d9c0bc2b3400e92c, type: 3}
+    SpawnWeight: 0
+    SpawnChance: 0
+    MinScale: 0
+    MaxScale: 0
+    YieldOverride: 0
+  - Prefab: {fileID: 148512280389709739, guid: f20125b3b0bdb224ebd38b0addf63d34, type: 3}
+    SpawnWeight: 0
+    SpawnChance: 0
+    MinScale: 0
+    MaxScale: 0
+    YieldOverride: 0
+  SlotsPerHex: 2
+  GlobalDensityMultiplier: 0.4
+  SpawnOnShoreCells: 1

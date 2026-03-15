@@ -271,11 +271,14 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::Mystpath.DebugCameraController
   _worldGenerator: {fileID: 0}
   _hexWorldSize: 1
+  _pitchAngle: 55
+  _yawAngle: 0
   _keyPanSpeed: 20
   _mousePanSensitivity: 0.015
+  _rotationSpeed: 60
   _zoomSpeed: 3
-  _minOrthographicSize: 3
-  _maxOrthographicSize: 120
+  _minZoomDistance: 8
+  _maxZoomDistance: 140
 --- !u!1 &410087039
 GameObject:
   m_ObjectHideFlags: 0
@@ -465,6 +468,8 @@ GameObject:
   - component: {fileID: 1237427857}
   - component: {fileID: 1237427856}
   - component: {fileID: 1237427855}
+  - component: {fileID: 1237427861}
+  - component: {fileID: 1237427860}
   m_Layer: 0
   m_Name: World
   m_TagString: Untagged
@@ -516,13 +521,13 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::Mystpath.WorldGenerator
   _hexGrid: {fileID: 0}
-  _worldWidth: 48
-  _worldHeight: 48
+  _worldWidth: 96
+  _worldHeight: 96
   _seed: 42
   _elevationNoiseScale: 0.05
   _waterThreshold: 0.38
-  _mountainCount: 2
-  _mountainRadius: 3
+  _mountainCount: 4
+  _mountainRadius: 5
 --- !u!114 &1237427858
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -552,6 +557,39 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &1237427860
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1237427854}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: f6846b88ba8daf243b85313f3cdee5bf, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::Mystpath.ShorelineResolver
+  _hexGrid: {fileID: 0}
+  _worldGenerator: {fileID: 0}
+--- !u!114 &1237427861
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1237427854}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 2d4e006b1bf093540af2ec808720df54, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::Mystpath.WorldTerrainBuilder
+  _hexGrid: {fileID: 0}
+  _worldGenerator: {fileID: 0}
+  _shorelineResolver: {fileID: 0}
+  _hexSize: 1
+  _elevationScale: 4
+  _waterElevationCap: 0.28
+  _terrainMaterial: {fileID: 0}
 --- !u!1660057539 &9223372036854775807
 SceneRoots:
   m_ObjectHideFlags: 0
