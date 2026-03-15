@@ -259,7 +259,7 @@ namespace Mystpath
                 DisplayName         = BuildMountainName(index),
                 AnchorHex           = center,
                 Radius              = _mountainRadius,
-                PeakHeight          = 0.90f,
+                PeakHeight          = 1.50f,  // max BaseElevation at the anchor after boost
                 EdgeFalloffSharpness = 0.60f,
             };
 
@@ -274,10 +274,16 @@ namespace Mystpath
                 int   dist = coord.DistanceTo(center);
                 float t    = (float)dist / _mountainRadius;
 
-                // Elevation boost tapers from strong at the peak to slight at the foothill edge.
-                // Pow(t, 0.7f) gives a slightly convex curve so the peak is wide.
-                float elevBoost = Mathf.Lerp(0.48f, 0.06f, Mathf.Pow(t, 0.7f));
-                cell.BaseElevation = Mathf.Clamp01(cell.BaseElevation + elevBoost);
+                // Elevation boost tapers from a strong peak contribution to a gentle foothill edge.
+                // Using Pow(t, 0.65f) keeps the peak wide and convex, then drops off toward edges.
+                //
+                // The boost intentionally allows BaseElevation to exceed the normal [0, 1] noise
+                // range (clamped to 1.8f rather than 1.0f) so mountain peaks sit clearly higher
+                // than any surrounding terrain and read as genuine landmark features.
+                // CellHeight() multiplies by _elevationScale, so a peak at 1.8 is 9 world units
+                // while average grassland (elev ~0.55) is only ~2.75 — a clear visual hierarchy.
+                float elevBoost = Mathf.Lerp(0.72f, 0.08f, Mathf.Pow(t, 0.65f));
+                cell.BaseElevation = Mathf.Clamp(cell.BaseElevation + elevBoost, 0f, 1.8f);
 
                 // Biome override: core cells become Mountain, the next ring becomes Tundra
                 // (foothill), and outer cells keep their noise-assigned biome as a transition.
