@@ -425,21 +425,34 @@ namespace Mystpath
                 }
             }
 
+            // Hidden resource overlay shows the dominant underground/extractor deposit.
+            // Food-class resources (RawFood, Grain, Fish) are not seeded underground
+            // so they will not appear here; they come from surface props and buildings.
             switch (dominant)
             {
-                case ResourceType.RawFood:   return new Color(0.95f, 0.55f, 0.10f); // orange
-                case ResourceType.CookedFood:return new Color(0.90f, 0.45f, 0.10f); // dark orange
-                case ResourceType.Grain:     return new Color(0.90f, 0.80f, 0.15f); // golden yellow
+                // Underground / extractor deposits
+                case ResourceType.Clay:      return new Color(0.65f, 0.38f, 0.22f); // terracotta
+                case ResourceType.Copper:    return new Color(0.80f, 0.45f, 0.15f); // copper orange
+                case ResourceType.Tin:       return new Color(0.60f, 0.70f, 0.55f); // muted grey-green
+                case ResourceType.Iron:      return new Color(0.20f, 0.55f, 0.70f); // steel blue
+                case ResourceType.Coal:      return new Color(0.25f, 0.25f, 0.28f); // near-black
+                case ResourceType.Silver:    return new Color(0.80f, 0.82f, 0.88f); // pale silver
+                case ResourceType.Gold:      return new Color(0.95f, 0.80f, 0.10f); // gold
+                case ResourceType.MysticOre: return new Color(0.60f, 0.20f, 0.90f); // purple
+                // Surface / processed goods (visible in the overlay if ever seeded)
+                case ResourceType.Stone:     return new Color(0.60f, 0.60f, 0.60f); // grey
                 case ResourceType.Wood:      return new Color(0.45f, 0.28f, 0.10f); // brown
                 case ResourceType.Lumber:    return new Color(0.55f, 0.35f, 0.15f); // lighter brown
-                case ResourceType.Stone:     return new Color(0.60f, 0.60f, 0.60f); // grey
-                case ResourceType.Ore:       return new Color(0.20f, 0.60f, 0.70f); // steel blue
                 case ResourceType.Metal:     return new Color(0.50f, 0.55f, 0.65f); // silver-blue
-                case ResourceType.Clay:      return new Color(0.65f, 0.38f, 0.22f); // terracotta
                 case ResourceType.Brick:     return new Color(0.75f, 0.30f, 0.20f); // brick red
                 case ResourceType.Fiber:     return new Color(0.70f, 0.55f, 0.85f); // lavender
                 case ResourceType.Cloth:     return new Color(0.80f, 0.65f, 0.90f); // light purple
                 case ResourceType.Tools:     return new Color(0.70f, 0.70f, 0.40f); // olive
+                // Food types — not normally in hidden weights, shown if ever present
+                case ResourceType.RawFood:   return new Color(0.95f, 0.55f, 0.10f); // orange
+                case ResourceType.CookedFood:return new Color(0.90f, 0.45f, 0.10f); // dark orange
+                case ResourceType.Grain:     return new Color(0.90f, 0.80f, 0.15f); // golden yellow
+                case ResourceType.Fish:      return new Color(0.30f, 0.65f, 0.85f); // ocean blue
                 default:                     return Color.magenta;                   // unknown — visible error
             }
         }

@@ -23,11 +23,37 @@ namespace Mystpath
         public float BaseElevation;
 
         // --- Water State ---
+        //
+        // Architecture note — future real water layer:
+        //   Currently water is represented as lowered blue terrain mesh.
+        //   The data model is intentionally structured so a future separate water
+        //   surface layer can sit above ocean/lake cells without reworking the grid.
+        //
+        //   When the water surface layer is implemented it should:
+        //     - Read IsWater to know which cells need a water quad
+        //     - Read WaterDepth to tint and set translucency
+        //     - Read IsShore (set by ShorelineResolver) to place foam/edge effects
+        //     - NOT modify terrain mesh — water sits above, terrain is the sea floor
+        //
+        //   Future systems that depend on water data:
+        //     - Fishery buildings: require adjacent IsWater hex
+        //     - Fish resources: density proportional to water area and depth
+        //     - Coastal structures (piers, harbours): require IsShore hex
+        //     - Ship navigation: pathfinds through connected IsWater cells
+        //     - Lake detection: flood-fill from IsWater cells not connected to the
+        //       ocean border can classify lakes vs ocean separately
 
-        /// <summary>Whether this cell contains standing or flowing water.</summary>
+        /// <summary>
+        /// Whether this cell is covered by water (ocean, lake, etc.).
+        /// Populated by WorldGenerator.RunWaterPass. Consumed by ShorelineResolver,
+        /// WorldTerrainBuilder, and future water surface / fishery systems.
+        /// </summary>
         public bool IsWater;
 
-        /// <summary>Water depth in world units. Zero for non-water cells.</summary>
+        /// <summary>
+        /// Approximate water depth in [0, 1] normalised units. Zero for non-water cells.
+        /// 1.0 = deepest ocean. Used for visual water tinting and future fish-density weighting.
+        /// </summary>
         public float WaterDepth;
 
         // --- Gameplay Properties ---
