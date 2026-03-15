@@ -13,6 +13,7 @@ namespace Mystpath
     /// Controls:
     ///   WASD / Arrow keys  — pan across the world (moves the camera pivot)
     ///   Q / E              — rotate the camera left / right around the current pivot
+    ///   Page Up / Page Down — raise / lower the camera pivot vertically (clamped range)
     ///   Middle mouse drag  — pan (click-drag on the world surface)
     ///   Right mouse drag   — pan (click-drag on the world surface)
     ///   Scroll wheel       — zoom in/out by moving the camera along its view axis
@@ -22,12 +23,19 @@ namespace Mystpath
     ///   view direction — a perspective dolly. The pitch angle is fixed; only
     ///   distance changes. This preserves the angled framing at all zoom levels.
     ///
+    /// Vertical offset model:
+    ///   Page Up / Page Down raise and lower the camera pivot on the Y axis within
+    ///   a clamped range (_minPivotY to _maxPivotY). This lets the player tilt the
+    ///   effective viewing angle slightly to improve readability of elevated terrain
+    ///   (mountains, plateaus) or to bring the horizon line closer. It is intentionally
+    ///   limited — this is not a free-fly debug camera.
+    ///
     /// Bounds:
     ///   Camera pivot is soft-clamped to the grid bounds so the view stays
-    ///   near the playfield.
+    ///   near the playfield. Vertical pivot is hard-clamped to _minPivotY / _maxPivotY.
     ///
     /// On Start, the camera automatically centres above the grid at a comfortable
-    /// overview distance. Call CenterOnWorld() at any time to return to that view.
+    /// management distance. Call CenterOnWorld() at any time to return to that view.
     ///
     /// The WorldGenerator reference is auto-resolved from the scene if not assigned
     /// in the inspector, so no manual wiring is required for basic usage.
@@ -53,7 +61,7 @@ namespace Mystpath
         [Header("Camera Angle")]
         [Tooltip("Pitch angle in degrees. 55 gives a Diablo-style angled overhead view " +
                  "that reads well for a strategy game. 90 = straight down.")]
-        [SerializeField, Range(30f, 80f)] private float _pitchAngle = 55f;
+        [SerializeField, Range(20f, 85f)] private float _pitchAngle = 55f;
 
         [Tooltip("Yaw angle in degrees. 0 = looking along +Z. 45 gives a classic " +
                  "isometric-flavoured orientation. Can be changed freely.")]
@@ -78,6 +86,17 @@ namespace Mystpath
         [Tooltip("Maximum camera distance from terrain surface (dolly far limit).")]
         [SerializeField] private float _maxZoomDistance = 140f;
 
+        [Header("Vertical Offset (Page Up / Page Down)")]
+        [Tooltip("Speed at which the pivot raises or lowers when Page Up / Page Down is held. " +
+                 "World units per second.")]
+        [SerializeField] private float _verticalPanSpeed = 18f;
+        [Tooltip("Lowest the pivot can be moved on the Y axis. " +
+                 "Negative values let the player look slightly below flat terrain.")]
+        [SerializeField] private float _minPivotY = -4f;
+        [Tooltip("Highest the pivot can be raised on the Y axis. " +
+                 "Allows shifting the view up to track mountains or elevated terrain.")]
+        [SerializeField] private float _maxPivotY = 20f;
+
         // =====================================================================
         // Private State
         // =====================================================================
@@ -93,6 +112,10 @@ namespace Mystpath
 
         // Current dolly distance from the pivot to the camera position.
         private float _zoomDistance;
+
+        // Current vertical offset of the pivot above the terrain ground plane.
+        // Adjusted by Page Up / Page Down and hard-clamped to [_minPivotY, _maxPivotY].
+        private float _pivotY = 0f;
 
         private static readonly float Sqrt3 = Mathf.Sqrt(3f);
 
@@ -127,6 +150,7 @@ namespace Mystpath
         {
             HandleKeyPan();
             HandleKeyRotation();
+            HandleVerticalOffset();
             HandleMouseDragPan();
             HandleScrollZoom();
             ClampPivotToBounds();
@@ -138,8 +162,12 @@ namespace Mystpath
         // =====================================================================
 
         /// <summary>
-        /// Repositions the camera pivot above the grid centre at a comfortable overview
+        /// Repositions the camera pivot above the grid centre at a comfortable management
         /// distance for the current grid size. Safe to call at any time.
+        ///
+        /// Default zoom is intentionally close (~22 % of world diameter) so the game
+        /// opens in a useful kingdom-builder framing rather than a far-out overview.
+        /// The player can zoom out freely with the scroll wheel to see the full map.
         /// </summary>
         public void CenterOnWorld()
         {
@@ -150,13 +178,16 @@ namespace Mystpath
             Vector3 worldCenter = new HexCoord(gridWidth / 2, gridHeight / 2)
                                       .ToWorldPosition(_hexWorldSize);
 
-            // Pivot sits at terrain level at the grid centre.
-            _pivot = new Vector3(worldCenter.x, 0f, worldCenter.z);
+            // Pivot sits at terrain level at the grid centre; vertical offset reset.
+            _pivotY = 0f;
+            _pivot  = new Vector3(worldCenter.x, _pivotY, worldCenter.z);
 
-            // Start far enough back to see the full map.
+            // Open at a close management distance (~22 % of world diameter) so the
+            // player sees useful detail immediately. 0.60 (the old default) was so
+            // far out that individual hexes and props were unreadable at startup.
             // Full world diameter ≈ gridWidth * hexSize * sqrt(3).
             float worldDiameter = gridWidth * _hexWorldSize * Sqrt3;
-            _zoomDistance = Mathf.Clamp(worldDiameter * 0.60f,
+            _zoomDistance = Mathf.Clamp(worldDiameter * 0.22f,
                                         _minZoomDistance,
                                         _maxZoomDistance);
 
@@ -197,6 +228,32 @@ namespace Mystpath
             if (Mathf.Approximately(rotDir, 0f)) return;
 
             _yawAngle += rotDir * _rotationSpeed * Time.deltaTime;
+        }
+
+        // =====================================================================
+        // Input — Page Up / Page Down Vertical Offset
+        // =====================================================================
+
+        /// <summary>
+        /// Raises or lowers the camera pivot on the Y axis when Page Up / Page Down
+        /// is held. The offset is hard-clamped to [_minPivotY, _maxPivotY] so the
+        /// player cannot fly the camera to an arbitrary height.
+        ///
+        /// This is a comfort feature — shifting the pivot up lets the player look
+        /// across elevated terrain (mountains, hills) without zooming out. Shifting
+        /// it down brings the horizon closer for a flatter, more overhead-focused angle.
+        /// </summary>
+        private void HandleVerticalOffset()
+        {
+            float dir = 0f;
+            if (Input.GetKey(KeyCode.PageUp))   dir += 1f;
+            if (Input.GetKey(KeyCode.PageDown)) dir -= 1f;
+            if (Mathf.Approximately(dir, 0f)) return;
+
+            _pivotY = Mathf.Clamp(
+                _pivotY + dir * _verticalPanSpeed * Time.deltaTime,
+                _minPivotY,
+                _maxPivotY);
         }
 
         // =====================================================================
@@ -271,7 +328,10 @@ namespace Mystpath
             float margin = _zoomDistance * 0.5f;
             _pivot.x = Mathf.Clamp(_pivot.x, -margin, maxX + margin);
             _pivot.z = Mathf.Clamp(_pivot.z, -margin, maxZ + margin);
-            _pivot.y = 0f; // keep pivot on the horizontal ground plane
+
+            // Apply vertical offset. _pivotY is already clamped in HandleVerticalOffset
+            // but we re-clamp here as a safety guard against external modifications.
+            _pivot.y = Mathf.Clamp(_pivotY, _minPivotY, _maxPivotY);
         }
 
         // =====================================================================

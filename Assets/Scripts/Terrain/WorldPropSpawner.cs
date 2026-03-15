@@ -104,7 +104,7 @@ namespace Mystpath
                  "  2.0 = dense / overgrown feel. " +
                  "  3.0+ = extreme — only useful for swamp/dense forest biomes. " +
                  "Per-biome tuning uses BiomePropSet.GlobalDensityMultiplier instead.")]
-        [SerializeField, Range(0f, 4f)] private float _globalDensityMultiplier = 1.5f;
+        [SerializeField, Range(0f, 20f)] private float _globalDensityMultiplier = 1.5f;
 
         [Header("Scale & Readability")]
         [Tooltip("Global scale multiplier applied on top of every per-entry scale range. " +
@@ -115,7 +115,7 @@ namespace Mystpath
                  "  3.5 = 4.4 units avg — clearly readable from kingdom-builder camera. " +
                  "  5.0 = 6.25 units avg — large, dramatic; good for hero props. " +
                  "Does not alter BiomePropSet assets; safe to tweak freely at runtime.")]
-        [SerializeField, Range(0.1f, 10f)] private float _globalScaleMultiplier = 3.5f;
+        [SerializeField, Range(0.1f, 30f)] private float _globalScaleMultiplier = 3.5f;
 
         [Header("Large-World Performance")]
         [Tooltip("Hard cap on the total number of spawned props across the whole world. " +
