@@ -46,6 +46,17 @@ namespace Mystpath
     ///   so the game remains responsive during world load. Use <see cref="_maxPropsTotal"/>
     ///   to hard-cap the prop count on very large (>300×300) worlds.
     ///
+    /// Coverage distribution:
+    ///   A two-octave Perlin coverage mask (<see cref="CoverageMask"/>,
+    ///   tuned by <see cref="_coverageNoiseScale"/>) creates smooth large-scale density
+    ///   variation spanning many hex cells. Rather than every cell rolling an identical
+    ///   flat spawn chance, props cluster naturally into dense patches, open glades, rocky
+    ///   outcrops, and sparse clearings — matching how real ecosystems distribute.
+    ///   Each biome uses its own shaping curve so Forest always has a dense floor and Desert
+    ///   stays mostly empty with occasional cactus/rock clusters.
+    ///   Jitter is also widened (0.75 × hexSize) with Mathf.Sqrt uniform-disk sampling so
+    ///   props spread across cell boundaries instead of piling at each cell's centre.
+    ///
     /// Future work:
     ///   TODO: Add GPU instancing / batching for large worlds (>200×200 hexes).
     ///   TODO: Add distance-based LOD or chunk-based streaming when needed.
@@ -121,6 +132,16 @@ namespace Mystpath
                  "500 is a good balance for most hardware.")]
         [SerializeField, Range(50, 2000)] private int _spawnBatchSize = 500;
 
+        [Header("Coverage Distribution")]
+        [Tooltip("Spatial frequency of the Perlin coverage noise mask. Lower = broader " +
+                 "smooth density zones that span more cells; higher = tighter variation. " +
+                 "At the default 0.08, one noise period spans ~12 hex cells, creating " +
+                 "natural forest patches and open glades. Raising to 0.15 tightens zones " +
+                 "to ~7 cells (small meadow pockets). Lowering to 0.04 gives very broad " +
+                 "25-cell zones, like continental-scale biome blending. " +
+                 "Safe to tune at runtime — only affects the next spawn pass.")]
+        [SerializeField, Range(0.02f, 0.40f)] private float _coverageNoiseScale = 0.08f;
+
         // =====================================================================
         // Private State
         // =====================================================================
@@ -153,6 +174,13 @@ namespace Mystpath
         // no in-flight modification of the HexGrid dictionary can cause
         // InvalidOperationException during the foreach.
         private readonly List<HexCell> _cellsSnapshot = new List<HexCell>();
+
+        // Noise offsets for the large-scale coverage mask.
+        // Derived deterministically from the world seed at the start of each spawn pass
+        // via SeedHash() with large fixed indices that never collide with cell coordinates
+        // or with WorldGenerator's biome/moisture noise offsets.
+        private float _coverageOffX;
+        private float _coverageOffZ;
 
         /// <summary>
         /// The only BiomeTypes that may be registered as primary biome prop sets.
@@ -296,6 +324,13 @@ namespace Mystpath
             // Cache seed for this generation pass so CellHash is consistent.
             _worldSeed = _worldGenerator != null ? _worldGenerator.LastUsedSeed : 0;
 
+            // Derive stable coverage noise offsets from the seed.
+            // SeedHash with large fixed indices ensures these are independent of both
+            // cell coordinates and WorldGenerator's noise offsets — each world seed
+            // produces a unique coverage pattern that is always deterministic.
+            _coverageOffX = SeedHash(20001) * 9999f;
+            _coverageOffZ = SeedHash(20002) * 9999f;
+
             // Create root hierarchy.
             var rootGo = new GameObject("PropsRoot");
             _propsRoot = rootGo.transform;
@@ -366,11 +401,26 @@ namespace Mystpath
         ///
         /// Each slot uses 6 independent CellHash channels:
         ///   0 — entry weight selection
-        ///   1 — spawn chance roll (entry × set × global multipliers)
-        ///   2 — position angle within the hex
-        ///   3 — position radius within the hex
+        ///   1 — spawn chance roll (SpawnChance × set density × global density × coverage mask)
+        ///   2 — position angle in [0, 2π] (uniform direction)
+        ///   3 — position radius (Mathf.Sqrt applied for uniform disk area distribution)
         ///   4 — scale lerp (entry range × global scale multiplier)
         ///   5 — Y-axis rotation (yaw only; prop stays upright)
+        ///
+        /// Coverage mask:
+        ///   A <see cref="CoverageMask"/> value is computed once per cell before the slot
+        ///   loop and multiplied into every slot's effective spawn chance. This creates smooth
+        ///   large-scale density variation — dense forest patches, open glades, rocky outcrops
+        ///   — without changing the slot count or adding more GameObjects.
+        ///   Each biome has its own shaping curve; see <see cref="CoverageMask"/>.
+        ///
+        /// Jitter (position):
+        ///   Jitter radius is 0.75 × hexSize, wider than the previous 0.45. This allows
+        ///   props to cross hex cell boundaries, breaking up the per-cell clump pattern so
+        ///   coverage feels spatially continuous rather than hex-grid-aligned.
+        ///   Mathf.Sqrt() on the raw radius value corrects the radial bias inherent in
+        ///   sampling a uniform [0, 1] value as a radius — without it, 50% of props would
+        ///   land in the inner 25% of the jitter area, crowding at each cell's centre.
         ///
         /// Orientation contract:
         ///   The random yaw is COMPOSED with the prefab's authored root rotation rather
@@ -395,14 +445,23 @@ namespace Mystpath
             int r = cell.Coord.R;
             Vector3 cellWorldPos = cell.Coord.ToWorldPosition(_hexSize);
 
-            // Prop positions are jittered within the hex's inner circle.
-            // Using 0.45 * hexSize keeps props off the very edge but covers most of the hex.
-            float innerRadius = _hexSize * 0.45f;
+            // Jitter radius wider than the hex inscribed circle so props spread across
+            // cell boundaries, breaking the per-cell clump pattern.
+            // 0.75 × hexSize reaches well into neighbouring cell territory, which is
+            // visually desirable at strategy-camera scale — coverage feels continuous.
+            float jitterRadius = _hexSize * 0.75f;
 
             // World-space Y at the cell center — used for all slots in this cell.
             float cellY = _terrainBuilder != null
                 ? cell.BaseElevation * _terrainBuilder.ElevationScale
                 : cell.BaseElevation * 5f;
+
+            // Large-scale coverage mask: smooth Perlin zones spanning multiple cells.
+            // Creates natural density variation — dense patches, open glades, sparse areas —
+            // without adding more GameObjects. Always uses cell.Biome so that shore-specific
+            // sets inherit the actual cell biome's coverage character.
+            // See CoverageMask() for biome-specific shaping rationale.
+            float coverageMask = CoverageMask(q, r, cell.Biome);
 
             int spawned = 0;
 
@@ -416,16 +475,22 @@ namespace Mystpath
                 BiomePropEntry entry = SelectWeightedEntry(set.Entries, selectRoll);
                 if (entry == null || entry.Prefab == null) continue;
 
-                // --- Spawn chance (combined multipliers) ---
+                // --- Spawn chance (all multipliers including coverage mask) ---
+                // coverageMask is the per-cell noise value, giving each cell a density
+                // that varies smoothly across space rather than being uniformly constant.
                 float spawnRoll = CellHash(q, r, ch + 1);
                 float effectiveChance = entry.SpawnChance
                     * set.GlobalDensityMultiplier
-                    * _globalDensityMultiplier;
+                    * _globalDensityMultiplier
+                    * coverageMask;
                 if (spawnRoll > effectiveChance) continue;
 
-                // --- Position jitter ---
-                float angle = CellHash(q, r, ch + 2) * 360f * Mathf.Deg2Rad;
-                float dist  = CellHash(q, r, ch + 3) * innerRadius;
+                // --- Position jitter (uniform disk distribution) ---
+                // Mathf.Sqrt() corrects radial bias: without it a uniform [0,1] radius
+                // places 50% of props in the inner 25% of the disc area (centre crowding).
+                // Sqrt maps the raw value to a radius that gives uniform area coverage.
+                float angle = CellHash(q, r, ch + 2) * Mathf.PI * 2f;
+                float dist  = Mathf.Sqrt(CellHash(q, r, ch + 3)) * jitterRadius;
 
                 Vector3 spawnPos = new Vector3(
                     cellWorldPos.x + Mathf.Cos(angle) * dist,
@@ -669,6 +734,92 @@ namespace Mystpath
         }
 
         // =====================================================================
+        // Coverage Distribution
+        // =====================================================================
+
+        /// <summary>
+        /// Returns a smooth coverage intensity in [0, 1] for hex cell (q, r), shaped
+        /// by the biome's character. This value is multiplied into every slot's effective
+        /// spawn chance in <see cref="SpawnPropsForCell"/>, creating organic large-scale
+        /// density variation without changing the total slot count or prop budget.
+        ///
+        /// Two Perlin octaves are blended:
+        ///   Primary (1×)   : broad smooth regions spanning ~12 cells at default scale.
+        ///   Secondary (2.5×): finer local texture that breaks up Perlin's squarish grids.
+        ///
+        /// Biome shaping:
+        ///   Forest   → [0.40, 1.00]  Dense floor — forests always have some coverage,
+        ///                             clearings just reduce density rather than emptying.
+        ///   Swamp    → [0.35, 1.00]  Similar to Forest but slightly more open pockets
+        ///                             to suggest standing water and bog patches.
+        ///   Grassland→ [0.20, 1.00]  Wide variation — open meadow glades alternate with
+        ///                             denser bush and plant patches.
+        ///   Mountain → power curve   Sparse by default; occasional rocky cluster at high
+        ///                             noise values reads as a natural rockfall or outcrop.
+        ///   Desert   → raw²          Most cells near-zero; rare dense patches suggest
+        ///                             isolated cactus or dune-rock groupings.
+        ///   Tundra   → raw^1.6       Slightly softer than Desert; cold ground-cover
+        ///                             gives a touch more even base coverage.
+        ///
+        /// The _coverageOffX/Z offsets are derived from the world seed so each seed
+        /// produces a unique but always deterministic coverage pattern.
+        /// </summary>
+        private float CoverageMask(int q, int r, BiomeType biome)
+        {
+            // Sample two Perlin octaves using the per-session noise offsets.
+            float bx = q * _coverageNoiseScale + _coverageOffX;
+            float bz = r * _coverageNoiseScale + _coverageOffZ;
+
+            float raw = Mathf.PerlinNoise(bx, bz) * 0.70f
+                      + Mathf.PerlinNoise(bx * 2.5f, bz * 2.5f) * 0.30f;
+
+            // Clamp: Perlin can return slightly outside [0,1] at tile seams.
+            raw = Mathf.Clamp01(raw);
+
+            // Biome-specific shaping — maps [0,1] noise to the coverage range
+            // appropriate for each biome's intended feel.
+            switch (biome)
+            {
+                case BiomeType.Forest:
+                    // Dense continuous canopy. Floor of 0.4 prevents true clearings;
+                    // the remaining 0–0.6 variation creates lighter and heavier patches.
+                    return 0.40f + raw * 0.60f;
+
+                case BiomeType.Swamp:
+                    // Cluttered and organic. Slightly wider low end than Forest so
+                    // wet-ground pockets and open bog patches occur naturally.
+                    return 0.35f + raw * 0.65f;
+
+                case BiomeType.Grassland:
+                    // Light-to-moderate scatter with the widest dynamic range.
+                    // High values produce bushy meadow patches; low values produce
+                    // the open, lightly-scattered plains feel.
+                    return 0.20f + raw * 0.80f;
+
+                case BiomeType.Mountain:
+                    // Sparse by default: squaring pushes most values toward zero,
+                    // but the ×1.6 factor lets the rare high-noise cells approach
+                    // full density — reads as a tight rocky cluster or scree field.
+                    return Mathf.Min(raw * raw * 1.6f, 1.0f);
+
+                case BiomeType.Desert:
+                    // Very sparse: strong squaring makes most cells near-empty.
+                    // Rare high-noise patches become isolated cactus / rock groupings.
+                    return raw * raw;
+
+                case BiomeType.Tundra:
+                    // Sparse like Desert, but power 1.6 is softer than squaring,
+                    // giving a slight even base to suggest frozen ground cover.
+                    return Mathf.Pow(raw, 1.6f);
+
+                default:
+                    // Fallback for Ocean, Shore, or any future biome: linear noise.
+                    // Shore sets pass cell.Biome so this covers unrecognised biomes only.
+                    return raw;
+            }
+        }
+
+        // =====================================================================
         // Deterministic Hash
         // =====================================================================
 
@@ -689,6 +840,30 @@ namespace Mystpath
                 h ^= (uint)(q       * 73856093u);
                 h ^= (uint)(r       * 19349663u);
                 h ^= (uint)(channel * 83492791u);
+                h ^= h >> 17;
+                h *= 0x45d9f3bu;
+                h ^= h >> 15;
+                return (h & 0xFFFFu) / 65535f;
+            }
+        }
+
+        /// <summary>
+        /// Deterministic hash seeded only from the world seed and an index integer.
+        /// Used to derive stable noise offsets that are independent of cell coordinates.
+        ///
+        /// Unlike <see cref="CellHash"/>, this produces the same output for the same
+        /// (seed, index) pair regardless of which cell is being processed, making it
+        /// suitable for world-level constants that should not vary per cell.
+        ///
+        /// The large fixed indices used by callers (e.g. 20001, 20002) prevent collisions
+        /// with the range of cell coordinates on any practical world size.
+        /// </summary>
+        private float SeedHash(int index)
+        {
+            unchecked
+            {
+                uint h = (uint)(_worldSeed * 2654435761u);
+                h ^= (uint)(index * 83492791u);
                 h ^= h >> 17;
                 h *= 0x45d9f3bu;
                 h ^= h >> 15;
