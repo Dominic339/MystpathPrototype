@@ -119,5 +119,22 @@ namespace Mystpath
         [Tooltip("Whether shore cells of this biome receive this set's props. " +
                  "Often true — shore forest cells still have trees.")]
         public bool SpawnOnShoreCells = true;
+
+        // =====================================================================
+        // Managed-production Exclusion
+        // =====================================================================
+
+        /// <summary>
+        /// When true, <see cref="WorldPropSpawner"/> ignores this set entirely.
+        /// Use for sets that represent managed player-controlled production
+        /// (e.g., crop fields, orchards) that must never appear as wild spawned props.
+        ///
+        /// Example: set this flag on any BiomePropSet whose name contains "Crops"
+        /// or "Farm" to keep it out of natural world generation.
+        /// </summary>
+        [Tooltip("If checked, WorldPropSpawner skips this set entirely. " +
+                 "Use for managed production sets (Crops_Future, Farm yields, etc.) " +
+                 "that should not appear as wild props in the world.")]
+        public bool ExcludeFromNaturalSpawning = false;
     }
 }

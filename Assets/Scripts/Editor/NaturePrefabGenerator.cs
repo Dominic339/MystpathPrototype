@@ -274,6 +274,154 @@ namespace Mystpath.Editor
 
         // ─────────────────────────────────────────────────────────────────────
 
+        /// <summary>
+        /// Scans every BiomePropSet asset in the project and auto-corrects
+        /// common misconfiguration issues that cause props not to appear:
+        ///
+        ///   SpawnWeight == 0   → set to 1.0  (entry would be unreachable by weighted selection)
+        ///   SpawnChance == 0   → set to 0.5  (entry would always be skipped)
+        ///   MinScale  == 0     → set to 0.85 (zero scale makes props invisible)
+        ///   MaxScale  == 0     → set to 1.15 (zero scale makes props invisible)
+        ///   MaxScale < MinScale→ swapped      (inverted range produces NaN scale)
+        ///
+        /// Entries whose Prefab is null are left untouched — they will still be
+        /// skipped by WorldPropSpawner, but removing them is a designer decision.
+        ///
+        /// Sets with ExcludeFromNaturalSpawning = true are reported but not modified.
+        ///
+        /// Safe to run multiple times; only dirty assets are written back.
+        /// Access via Tools → Mystpath → Validate and Fix Biome Prop Sets.
+        /// </summary>
+        [MenuItem("Tools/Mystpath/Validate and Fix Biome Prop Sets")]
+        private static void ValidateAndFixBiomePropSets()
+        {
+            string[] guids = AssetDatabase.FindAssets("t:BiomePropSet");
+
+            if (guids.Length == 0)
+            {
+                EditorUtility.DisplayDialog(
+                    "Mystpath — Validate Biome Prop Sets",
+                    "No BiomePropSet assets found in the project.\n\n" +
+                    "Create some via Create → Mystpath → World → Biome Prop Set\n" +
+                    "or run Tools/Mystpath/Create Default Biome Prop Sets first.",
+                    "OK");
+                return;
+            }
+
+            int setsFixed   = 0;
+            int entriesFixed = 0;
+            int setsExcluded = 0;
+            int setsEmpty    = 0;
+            var report = new System.Text.StringBuilder();
+
+            try
+            {
+                AssetDatabase.StartAssetEditing();
+
+                for (int i = 0; i < guids.Length; i++)
+                {
+                    string path = AssetDatabase.GUIDToAssetPath(guids[i]);
+                    var set = AssetDatabase.LoadAssetAtPath<BiomePropSet>(path);
+                    if (set == null) continue;
+
+                    EditorUtility.DisplayProgressBar(
+                        "Mystpath — Validating Biome Prop Sets",
+                        $"{set.name}  ({i + 1} / {guids.Length})",
+                        (float)i / guids.Length);
+
+                    if (set.ExcludeFromNaturalSpawning)
+                    {
+                        setsExcluded++;
+                        continue; // Managed sets — don't touch them.
+                    }
+
+                    if (set.Entries == null || set.Entries.Count == 0)
+                    {
+                        setsEmpty++;
+                        report.AppendLine($"  EMPTY: {set.name} — no entries to fix");
+                        continue;
+                    }
+
+                    bool setDirty = false;
+
+                    foreach (BiomePropEntry e in set.Entries)
+                    {
+                        if (e == null) continue;
+
+                        bool entryDirty = false;
+
+                        if (e.SpawnWeight <= 0f)
+                        {
+                            e.SpawnWeight = 1f;
+                            entryDirty = true;
+                        }
+
+                        if (e.SpawnChance <= 0f)
+                        {
+                            e.SpawnChance = 0.5f;
+                            entryDirty = true;
+                        }
+
+                        if (e.MinScale <= 0f)
+                        {
+                            e.MinScale = 0.85f;
+                            entryDirty = true;
+                        }
+
+                        if (e.MaxScale <= 0f)
+                        {
+                            e.MaxScale = 1.15f;
+                            entryDirty = true;
+                        }
+
+                        // Ensure min ≤ max; swap if inverted.
+                        if (e.MinScale > e.MaxScale)
+                        {
+                            float tmp = e.MinScale;
+                            e.MinScale = e.MaxScale;
+                            e.MaxScale = tmp;
+                            entryDirty = true;
+                        }
+
+                        if (entryDirty)
+                        {
+                            entriesFixed++;
+                            setDirty = true;
+                        }
+                    }
+
+                    if (setDirty)
+                    {
+                        EditorUtility.SetDirty(set);
+                        setsFixed++;
+                        report.AppendLine($"  FIXED: {set.name}");
+                    }
+                }
+            }
+            finally
+            {
+                AssetDatabase.StopAssetEditing();
+                EditorUtility.ClearProgressBar();
+                AssetDatabase.SaveAssets();
+                AssetDatabase.Refresh();
+            }
+
+            string summary =
+                $"Validation complete.\n\n" +
+                $"Sets scanned  : {guids.Length}\n" +
+                $"Sets fixed    : {setsFixed}  ({entriesFixed} entries corrected)\n" +
+                $"Sets skipped  : {setsExcluded} (ExcludeFromNaturalSpawning=true)\n" +
+                $"Sets empty    : {setsEmpty} (no entries — add prefabs in Inspector)\n";
+
+            if (report.Length > 0)
+                summary += $"\nDetails:\n{report}";
+
+            EditorUtility.DisplayDialog("Mystpath — Validate Biome Prop Sets", summary, "OK");
+            Debug.Log($"[NaturePrefabGenerator] ValidateAndFixBiomePropSets: {summary.Replace('\n', ' ')}");
+        }
+
+        // ─────────────────────────────────────────────────────────────────────
+
         [MenuItem("Tools/Mystpath/Create Default Biome Prop Sets")]
         private static void CreateDefaultBiomePropSets()
         {

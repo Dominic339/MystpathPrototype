@@ -59,7 +59,8 @@ namespace Mystpath
         [Header("Biome Prop Sets")]
         [Tooltip("One BiomePropSet asset per biome plus any IsShoreSpecificSet assets. " +
                  "Create assets via Create → Mystpath → World → Biome Prop Set, or run " +
-                 "Tools/Mystpath/Create Default Biome Prop Sets to generate empty templates.")]
+                 "Tools/Mystpath/Create Default Biome Prop Sets to generate empty templates. " +
+                 "Sets with ExcludeFromNaturalSpawning=true are automatically skipped.")]
         [SerializeField] private List<BiomePropSet> _biomePropSets = new List<BiomePropSet>();
 
         [Header("Spawn Settings")]
@@ -92,6 +93,17 @@ namespace Mystpath
 
         // Cached world seed — set when SpawnAllProps() runs so CellHash is correct.
         private int _worldSeed;
+
+        // Re-entrant call guard: prevents a second SpawnAllProps() from starting
+        // while a previous one is still running (can happen if events fire unexpectedly
+        // during the synchronous generation chain on debug regeneration).
+        private bool _isSpawning;
+
+        // Reusable snapshot list — avoids allocating a new list on every spawn.
+        // Populated with a stable copy of GetAllCells() before iteration so that
+        // no in-flight modification of the HexGrid dictionary can cause
+        // InvalidOperationException during the foreach.
+        private readonly List<HexCell> _cellsSnapshot = new List<HexCell>();
 
         // =====================================================================
         // Unity Lifecycle
@@ -151,15 +163,51 @@ namespace Mystpath
         ///
         /// Called automatically when the terrain is built or rebuilt. Safe to call
         /// manually, e.g., after changing BiomePropSet assets in a debug context.
+        /// Re-entrant calls are silently dropped — only one spawn pass runs at a time.
         /// </summary>
         public void SpawnAllProps()
         {
+            if (_isSpawning)
+            {
+                Debug.LogWarning("[WorldPropSpawner] SpawnAllProps re-entrant call ignored.");
+                return;
+            }
+
             if (_hexGrid == null)
             {
                 Debug.LogError("[WorldPropSpawner] HexGrid not found. Prop spawning aborted.");
                 return;
             }
 
+            _isSpawning = true;
+            try
+            {
+                SpawnAllPropsInternal();
+            }
+            finally
+            {
+                _isSpawning = false;
+            }
+        }
+
+        /// <summary>Destroys all spawned prop GameObjects. Called before each respawn.</summary>
+        public void ClearAllProps()
+        {
+            _containers.Clear();
+
+            if (_propsRoot != null)
+            {
+                Destroy(_propsRoot.gameObject);
+                _propsRoot = null;
+            }
+        }
+
+        // =====================================================================
+        // Internal Spawn
+        // =====================================================================
+
+        private void SpawnAllPropsInternal()
+        {
             ClearAllProps();
 
             // Cache seed for this generation pass so CellHash is consistent.
@@ -170,9 +218,19 @@ namespace Mystpath
             _propsRoot = rootGo.transform;
             _propsRoot.SetParent(transform, worldPositionStays: false);
 
+            // Take a stable snapshot of the cell collection before iterating.
+            // This prevents any potential InvalidOperationException if the HexGrid
+            // dictionary is modified during the synchronous world-generation event chain.
+            _cellsSnapshot.Clear();
+            foreach (HexCell c in _hexGrid.GetAllCells())
+            {
+                if (c != null)
+                    _cellsSnapshot.Add(c);
+            }
+
             int totalSpawned = 0;
 
-            foreach (HexCell cell in _hexGrid.GetAllCells())
+            foreach (HexCell cell in _cellsSnapshot)
             {
                 // Never place surface props on water cells.
                 if (cell.IsWater) continue;
@@ -193,20 +251,9 @@ namespace Mystpath
                 }
             }
 
-            Debug.Log($"[WorldPropSpawner] Spawned {totalSpawned} props " +
+            Debug.Log($"[WorldPropSpawner] Spawned {totalSpawned} props across " +
+                      $"{_cellsSnapshot.Count} land cells " +
                       $"(seed={_worldSeed}, globalDensity={_globalDensityMultiplier:F2}).");
-        }
-
-        /// <summary>Destroys all spawned prop GameObjects. Called before each respawn.</summary>
-        public void ClearAllProps()
-        {
-            _containers.Clear();
-
-            if (_propsRoot != null)
-            {
-                Destroy(_propsRoot.gameObject);
-                _propsRoot = null;
-            }
         }
 
         // =====================================================================
@@ -228,6 +275,7 @@ namespace Mystpath
         /// <returns>Number of props actually spawned for this cell/set combination.</returns>
         private int SpawnPropsForCell(HexCell cell, BiomePropSet set)
         {
+            if (set == null) return 0;
             if (set.Entries == null || set.Entries.Count == 0) return 0;
 
             int q = cell.Coord.Q;
@@ -277,7 +325,11 @@ namespace Mystpath
 
                 // --- Scale ---
                 float scaleT = CellHash(q, r, ch + 4);
-                float scale  = Mathf.Lerp(entry.MinScale, entry.MaxScale, scaleT);
+                // Guard against inverted min/max (misconfigured entry).
+                float minS = Mathf.Min(entry.MinScale, entry.MaxScale);
+                float maxS = Mathf.Max(entry.MinScale, entry.MaxScale);
+                float scale = Mathf.Lerp(minS, maxS, scaleT);
+                if (scale <= 0f) scale = 1f; // zero scale would make props invisible
 
                 // --- Rotation ---
                 float rotY = CellHash(q, r, ch + 5) * 360f;
@@ -319,9 +371,19 @@ namespace Mystpath
             _setByBiome.Clear();
             _shoreSets.Clear();
 
+            int skipped = 0;
+
             foreach (BiomePropSet set in _biomePropSets)
             {
                 if (set == null) continue;
+
+                // Skip sets explicitly excluded from natural world spawning
+                // (e.g., Crops_Future, managed farm yields).
+                if (set.ExcludeFromNaturalSpawning)
+                {
+                    skipped++;
+                    continue;
+                }
 
                 if (set.IsShoreSpecificSet)
                 {
@@ -331,10 +393,63 @@ namespace Mystpath
                 {
                     if (_setByBiome.ContainsKey(set.TargetBiome))
                         Debug.LogWarning($"[WorldPropSpawner] Duplicate BiomePropSet for biome " +
-                                         $"{set.TargetBiome} — using the last registered one.");
+                                         $"{set.TargetBiome} — \"{set.name}\" overwrites previous. " +
+                                         "Consider removing or merging duplicates.");
                     _setByBiome[set.TargetBiome] = set;
                 }
+
+                // Warn if the set has entries but none will ever spawn.
+                WarnIfSetEffectivelyEmpty(set);
             }
+
+            if (skipped > 0)
+                Debug.Log($"[WorldPropSpawner] Skipped {skipped} set(s) marked ExcludeFromNaturalSpawning.");
+
+            if (_setByBiome.Count == 0 && _shoreSets.Count == 0)
+                Debug.LogWarning("[WorldPropSpawner] No usable BiomePropSets registered. " +
+                                 "Assign assets to the Biome Prop Sets list in the Inspector, " +
+                                 "or run Tools/Mystpath/Create Default Biome Prop Sets.");
+        }
+
+        /// <summary>
+        /// Logs a warning if every entry in <paramref name="set"/> has SpawnChance == 0
+        /// or there are no entries with a valid (non-null) prefab, so the designer
+        /// can catch misconfigured assets before entering Play Mode.
+        /// </summary>
+        private static void WarnIfSetEffectivelyEmpty(BiomePropSet set)
+        {
+            if (set.Entries == null || set.Entries.Count == 0)
+            {
+                Debug.LogWarning($"[WorldPropSpawner] BiomePropSet \"{set.name}\" has no entries. " +
+                                 "Add prefab entries in the Inspector, or run " +
+                                 "Tools/Mystpath/Validate and Fix Biome Prop Sets.");
+                return;
+            }
+
+            bool hasValidPrefab  = false;
+            bool hasNonZeroChance = false;
+            bool hasNonZeroWeight = false;
+
+            foreach (BiomePropEntry e in set.Entries)
+            {
+                if (e == null) continue;
+                if (e.Prefab != null)            hasValidPrefab  = true;
+                if (e.SpawnChance > 0f)          hasNonZeroChance = true;
+                if (e.SpawnWeight > 0f)          hasNonZeroWeight = true;
+            }
+
+            if (!hasValidPrefab)
+                Debug.LogWarning($"[WorldPropSpawner] BiomePropSet \"{set.name}\": " +
+                                 "all entries have null prefabs — nothing will spawn. " +
+                                 "Assign prefabs from Assets/Prefabs/Nature/.");
+            else if (!hasNonZeroWeight)
+                Debug.LogWarning($"[WorldPropSpawner] BiomePropSet \"{set.name}\": " +
+                                 "all entries have SpawnWeight = 0 — nothing will spawn. " +
+                                 "Run Tools/Mystpath/Validate and Fix Biome Prop Sets.");
+            else if (!hasNonZeroChance)
+                Debug.LogWarning($"[WorldPropSpawner] BiomePropSet \"{set.name}\": " +
+                                 "all entries have SpawnChance = 0 — nothing will spawn. " +
+                                 "Run Tools/Mystpath/Validate and Fix Biome Prop Sets.");
         }
 
         // =====================================================================
@@ -352,7 +467,7 @@ namespace Mystpath
 
             float totalWeight = 0f;
             foreach (BiomePropEntry e in entries)
-                if (e != null) totalWeight += e.SpawnWeight;
+                if (e != null && e.Prefab != null) totalWeight += e.SpawnWeight;
 
             if (totalWeight <= 0f) return null;
 
@@ -361,14 +476,14 @@ namespace Mystpath
 
             foreach (BiomePropEntry e in entries)
             {
-                if (e == null) continue;
+                if (e == null || e.Prefab == null) continue;
                 accumulated += e.SpawnWeight;
                 if (threshold <= accumulated) return e;
             }
 
             // Floating-point safety: return last valid entry.
             for (int i = entries.Count - 1; i >= 0; i--)
-                if (entries[i] != null) return entries[i];
+                if (entries[i] != null && entries[i].Prefab != null) return entries[i];
 
             return null;
         }
