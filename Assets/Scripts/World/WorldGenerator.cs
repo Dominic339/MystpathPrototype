@@ -48,6 +48,13 @@ namespace Mystpath
         /// <summary>All terrain features stamped into the world during generation.</summary>
         public IReadOnlyList<TerrainFeature> TerrainFeatures => _terrainFeatures;
 
+        /// <summary>
+        /// Fired synchronously at the end of every successful GenerateWorld call.
+        /// Systems that depend on world data (terrain builder, shoreline resolver, etc.)
+        /// subscribe here to rebuild themselves automatically on regeneration.
+        /// </summary>
+        public event System.Action OnWorldGenerated;
+
         // --- Private State ---
 
         private readonly List<TerrainFeature> _terrainFeatures = new List<TerrainFeature>();
@@ -121,6 +128,10 @@ namespace Mystpath
             Debug.Log($"[WorldGenerator] World generated. Seed={_seed}, " +
                       $"Size={_worldWidth}×{_worldHeight}, " +
                       $"Cells={_hexGrid.CellCount}, Features={_terrainFeatures.Count}.");
+
+            // Notify subscribers (ShorelineResolver, WorldTerrainBuilder, etc.) so they
+            // can rebuild automatically without requiring explicit wiring in GameBootstrap.
+            OnWorldGenerated?.Invoke();
         }
 
         /// <summary>Generates a world with a freshly randomized seed.</summary>

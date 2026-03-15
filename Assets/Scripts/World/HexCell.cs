@@ -67,6 +67,15 @@ namespace Mystpath
         /// <summary>Returns true if this cell is a member of any terrain feature.</summary>
         public bool HasFeature => !string.IsNullOrEmpty(OwningFeatureId);
 
+        // --- Shoreline ---
+
+        /// <summary>
+        /// Whether this land cell borders at least one water cell.
+        /// Populated by ShorelineResolver after world generation.
+        /// Shore cells receive adjusted movement costs and may receive visual shoreline treatment.
+        /// </summary>
+        public bool IsShore;
+
         // --- Occupancy ---
 
         /// <summary>The building instance occupying this cell, or null if unoccupied.</summary>
