@@ -61,15 +61,25 @@ namespace Mystpath
         // Scale
         // =====================================================================
 
-        /// <summary>Minimum uniform scale multiplier applied on instantiation.</summary>
-        [Tooltip("Minimum uniform scale. Combined with a per-spawn random roll.")]
+        /// <summary>
+        /// Minimum uniform scale multiplier applied on instantiation.
+        /// The final scale is further multiplied by
+        /// <see cref="WorldPropSpawner._globalScaleMultiplier"/> (default 2×),
+        /// so a value of 1.0 here results in a 2× world-space scale at default settings.
+        /// </summary>
+        [Tooltip("Minimum uniform scale (before the spawner's Global Scale Multiplier). " +
+                 "At the default Global Scale Multiplier of 2, MinScale=1 → world scale 2.")]
         [Range(0.1f, 5f)]
-        public float MinScale = 0.85f;
+        public float MinScale = 1f;
 
-        /// <summary>Maximum uniform scale multiplier applied on instantiation.</summary>
-        [Tooltip("Maximum uniform scale. Combined with a per-spawn random roll.")]
+        /// <summary>
+        /// Maximum uniform scale multiplier applied on instantiation.
+        /// See <see cref="MinScale"/> for how this interacts with the global multiplier.
+        /// </summary>
+        [Tooltip("Maximum uniform scale (before the spawner's Global Scale Multiplier). " +
+                 "At the default Global Scale Multiplier of 2, MaxScale=1.5 → world scale 3.")]
         [Range(0.1f, 5f)]
-        public float MaxScale = 1.15f;
+        public float MaxScale = 1.5f;
 
         // =====================================================================
         // Yield Override

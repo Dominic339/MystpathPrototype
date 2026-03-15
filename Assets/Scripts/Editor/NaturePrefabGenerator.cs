@@ -140,12 +140,19 @@ namespace Mystpath.Editor
         // feel of each prop type globally.
         private static readonly Category[] Categories =
         {
+            // Scale note: these minScale/maxScale values are per-entry defaults used by
+            // ValidateAndFixBiomePropSets.  At runtime they are further multiplied by
+            // WorldPropSpawner._globalScaleMultiplier (default 2×), so a minScale of 1.0
+            // produces a final world-space scale of 2× the model's native unit size.
+            // Tune _globalScaleMultiplier in the Inspector for camera-distance readability
+            // without touching individual BiomePropSet assets.
+
             // Ore outcrops — rare, clumped, high visual interest but low density.
             new Category("OreOutcrops",
                 new[] { "ore_vein", "vein", "outcrop", "mineral", "ore" },
                 ColliderShape.Box, isHarvestable: true,
                 ResourceType.Copper, minYield: 1, maxYield: 3, maxCount: 2,
-                spawnWeight: 1.5f, spawnChance: 0.15f, minScale: 0.90f, maxScale: 1.20f),
+                spawnWeight: 1.5f, spawnChance: 0.15f, minScale: 1.0f, maxScale: 1.5f),
 
             // Trees — dominant in forested biomes, moderate in others.
             new Category("Trees",
@@ -153,21 +160,21 @@ namespace Mystpath.Editor
                          "willow", "palm", "conifer", "maple", "cedar" },
                 ColliderShape.Capsule, isHarvestable: true,
                 ResourceType.Wood, minYield: 3, maxYield: 8, maxCount: 1,
-                spawnWeight: 3.0f, spawnChance: 0.35f, minScale: 0.90f, maxScale: 1.15f),
+                spawnWeight: 3.0f, spawnChance: 0.35f, minScale: 1.0f, maxScale: 1.5f),
 
             // Rocks — visible landmarks, less frequent than vegetation.
             new Category("Rocks",
                 new[] { "rock", "stone", "boulder", "cliff", "pebble" },
                 ColliderShape.Box, isHarvestable: true,
                 ResourceType.Stone, minYield: 1, maxYield: 4, maxCount: 2,
-                spawnWeight: 2.0f, spawnChance: 0.22f, minScale: 0.80f, maxScale: 1.25f),
+                spawnWeight: 2.0f, spawnChance: 0.22f, minScale: 0.9f, maxScale: 1.5f),
 
             // Bushes — frequent understorey, high density acceptable.
             new Category("Bushes",
                 new[] { "bush", "shrub", "brush", "hedge", "berry" },
                 ColliderShape.Capsule, isHarvestable: true,
                 ResourceType.Fiber, minYield: 1, maxYield: 2, maxCount: 1,
-                spawnWeight: 4.0f, spawnChance: 0.45f, minScale: 0.85f, maxScale: 1.10f),
+                spawnWeight: 4.0f, spawnChance: 0.45f, minScale: 0.8f, maxScale: 1.2f),
 
             // Desert plants — moderate density, distinctive silhouettes.
             new Category("Desert",
@@ -175,35 +182,35 @@ namespace Mystpath.Editor
                          "sand_plant", "sandplant" },
                 ColliderShape.Capsule, isHarvestable: true,
                 ResourceType.Fiber, minYield: 1, maxYield: 2, maxCount: 1,
-                spawnWeight: 3.5f, spawnChance: 0.40f, minScale: 0.85f, maxScale: 1.10f),
+                spawnWeight: 3.5f, spawnChance: 0.40f, minScale: 0.9f, maxScale: 1.4f),
 
             // Reeds — dense along shore/swamp cells.
             new Category("Reeds",
                 new[] { "reed", "cattail", "bulrush", "watergrass" },
                 ColliderShape.Box, isHarvestable: true,
                 ResourceType.Fiber, minYield: 1, maxYield: 3, maxCount: 1,
-                spawnWeight: 4.0f, spawnChance: 0.50f, minScale: 0.85f, maxScale: 1.10f),
+                spawnWeight: 4.0f, spawnChance: 0.50f, minScale: 0.8f, maxScale: 1.2f),
 
             // Ground plants and flowers — filler vegetation, common.
             new Category("Plants",
                 new[] { "flower", "plant", "herb", "fern", "weed" },
                 ColliderShape.Capsule, isHarvestable: true,
                 ResourceType.Fiber, minYield: 1, maxYield: 2, maxCount: 1,
-                spawnWeight: 4.0f, spawnChance: 0.45f, minScale: 0.85f, maxScale: 1.10f),
+                spawnWeight: 4.0f, spawnChance: 0.45f, minScale: 0.8f, maxScale: 1.2f),
 
             // Debris — fallen logs, stumps, driftwood. Rare and atmospheric.
             new Category("Debris",
                 new[] { "log", "stump", "driftwood", "debris" },
                 ColliderShape.Box, isHarvestable: true,
                 ResourceType.Wood, minYield: 1, maxYield: 3, maxCount: 1,
-                spawnWeight: 1.0f, spawnChance: 0.08f, minScale: 0.90f, maxScale: 1.10f),
+                spawnWeight: 1.0f, spawnChance: 0.08f, minScale: 1.0f, maxScale: 1.5f),
 
             // Ground cover grass — most common, cheapest to render; very high density.
             new Category("Grass",
                 new[] { "grass", "tuft", "groundcover" },
                 ColliderShape.Box, isHarvestable: false,
                 ResourceType.None,
-                spawnWeight: 5.0f, spawnChance: 0.55f, minScale: 0.85f, maxScale: 1.10f),
+                spawnWeight: 5.0f, spawnChance: 0.55f, minScale: 0.7f, maxScale: 1.1f),
 
             // Catch-all for anything not matched above.
             // Placed last so it only applies to unclassified models.
@@ -211,7 +218,7 @@ namespace Mystpath.Editor
                 new[] { "" },   // empty keyword matches anything
                 ColliderShape.Box, isHarvestable: false,
                 ResourceType.None,
-                spawnWeight: 1.0f, spawnChance: 0.20f, minScale: 0.90f, maxScale: 1.10f),
+                spawnWeight: 1.0f, spawnChance: 0.20f, minScale: 1.0f, maxScale: 1.5f),
         };
 
         // =====================================================================
