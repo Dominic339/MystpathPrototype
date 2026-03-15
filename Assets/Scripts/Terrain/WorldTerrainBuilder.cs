@@ -290,6 +290,7 @@ namespace Mystpath
         {
             var vertices  = new List<Vector3>();
             var colors    = new List<Color>();
+            var uvs       = new List<Vector2>(); // UV0: (BaseElevation, IsShore) for shader effects
             var triangles = new List<int>();
 
             // Maps a quantized world-position key to an already-created vertex index.
@@ -302,10 +303,12 @@ namespace Mystpath
                 float   centerY   = CellHeight(cell);
                 Color   cellColor = BiomeBlendCalculator.GetCellColor(cell);
 
-                // Center vertex: unique per hex, carries the cell's pure biome color.
+                // Center vertex: unique per hex, carries the cell's pure biome color
+                // and UV0 data (elevation, IsShore) for the terrain shader.
                 int centerIdx = vertices.Count;
                 vertices.Add(new Vector3(worldXZ.x, centerY, worldXZ.z));
                 colors.Add(cellColor);
+                uvs.Add(BiomeBlendCalculator.GetCellUV(cell));
 
                 // Six corner vertices — shared with whichever neighboring hex visits
                 // the same geometric corner position first.
@@ -326,6 +329,7 @@ namespace Mystpath
                         idx = vertices.Count;
                         vertices.Add(new Vector3(wx, CornerHeight(cell, i), wz));
                         colors.Add(BiomeBlendCalculator.BlendCornerColor(cell, n1, n2));
+                        uvs.Add(BiomeBlendCalculator.BlendCornerUV(cell, n1, n2));
                         cornerCache[key] = idx;
                     }
 
@@ -350,6 +354,7 @@ namespace Mystpath
 
             mesh.SetVertices(vertices);
             mesh.SetColors(colors);
+            mesh.SetUVs(0, uvs);       // UV0: .x = BaseElevation, .y = IsShore flag
             mesh.SetTriangles(triangles, 0);
 
             // Shared corner vertices allow RecalculateNormals to average across hex

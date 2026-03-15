@@ -15,6 +15,12 @@ namespace Mystpath
     ///
     /// Also centralises the biome → representative color mapping so
     /// WorldTerrainBuilder and future systems read colors from one source of truth.
+    ///
+    /// UV data:
+    ///   GetCellUV / BlendCornerUV produce per-vertex float2 values passed to the
+    ///   terrain shader via mesh UV channel 0. The shader uses them for elevation-based
+    ///   snow, shore-wetness darkening, and other effects that require per-cell data
+    ///   beyond what a single blended color can express.
     /// </summary>
     public static class BiomeBlendCalculator
     {
@@ -55,9 +61,20 @@ namespace Mystpath
         // =====================================================================
 
         /// <summary>
-        /// Returns the display color for a single cell, taking elevation and
-        /// water depth into account. Used for center vertices where the cell's
-        /// own biome dominates fully.
+        /// Returns the display color for a single cell, taking elevation,
+        /// water depth, and shoreline state into account. Used for center
+        /// vertices where the cell's own biome dominates fully.
+        ///
+        /// Color pipeline (land cells):
+        ///   1. Base biome color from GetBiomeColor.
+        ///   2. Subtle elevation tint — higher cells slightly lighter.
+        ///   3. Shore blend — IsShore cells blended 50 % toward damp-sand so
+        ///      coastlines read as sandy/wet regardless of the inland biome.
+        ///      The blend is partial so forest-shore still reads greener than
+        ///      desert-shore; biome identity is preserved.
+        ///
+        /// Further surface effects (snow, slope rock, surface grain) are
+        /// applied in the shader using UV0 elevation / shore data from GetCellUV.
         /// </summary>
         public static Color GetCellColor(HexCell cell)
         {
@@ -76,7 +93,19 @@ namespace Mystpath
             // Slight elevation tint: higher cells lean a little lighter/cooler.
             // Range is subtle so biome identity stays clear.
             float elevT = Mathf.Clamp01((cell.BaseElevation - 0.3f) / 0.7f);
-            return Color.Lerp(baseColor * 0.82f, baseColor, elevT);
+            baseColor = Color.Lerp(baseColor * 0.82f, baseColor, elevT);
+
+            // Shore blend: cells tagged IsShore blend toward damp beach sand.
+            // Creates a visible sandy/wet band at every land-water boundary.
+            // Applied in vertex colors (not only in the shader) so the existing
+            // corner-blending system smoothly interpolates the shore transition.
+            if (cell.IsShore)
+            {
+                Color dampSand = new Color(0.72f, 0.64f, 0.44f); // damp beach sand
+                baseColor = Color.Lerp(baseColor, dampSand, 0.50f);
+            }
+
+            return baseColor;
         }
 
         // =====================================================================
@@ -98,6 +127,58 @@ namespace Mystpath
             // Weighted average: cell is dominant, neighbors contribute equally.
             float totalWeight = 1f + NeighborWeight + NeighborWeight;
             return (c0 * 1f + c1 * NeighborWeight + c2 * NeighborWeight) / totalWeight;
+        }
+
+        // =====================================================================
+        // Per-Vertex UV Data
+        // =====================================================================
+
+        /// <summary>
+        /// Returns per-vertex UV data that the terrain shader reads from UV channel 0
+        /// to apply surface effects that cannot be expressed as a single blended color:
+        ///
+        ///   UV.x = BaseElevation (raw 0–1+ range from world generator).
+        ///          The shader uses this for elevation-based snow blending: cells with
+        ///          BaseElevation above _SnowElevation (default 0.82) gradually blend
+        ///          to a snow color. Mountain peaks (elevation 1.0–1.8) reliably hit
+        ///          this threshold; grasslands (0.4–0.6) do not.
+        ///
+        ///   UV.y = IsShore flag (1.0 = shore land cell, 0.0 = all other cells).
+        ///          The shader uses this for shore-wetness darkening on top of the
+        ///          sandy blend already baked into vertex colors by GetCellColor.
+        ///
+        /// Water cells report (0, 0) — their visual treatment is handled by the
+        /// color gradient in GetCellColor and requires no shader UV effects.
+        /// </summary>
+        public static Vector2 GetCellUV(HexCell cell)
+        {
+            float elev  = cell.IsWater ? 0f : cell.BaseElevation;
+            float shore = (cell.IsShore && !cell.IsWater) ? 1f : 0f;
+            return new Vector2(elev, shore);
+        }
+
+        /// <summary>
+        /// Returns a blended UV for a hex corner shared by <paramref name="cell"/>,
+        /// <paramref name="neighbor1"/>, and <paramref name="neighbor2"/>.
+        ///
+        /// Uses the same dominant-cell weighting as <see cref="BlendCornerColor"/> so
+        /// elevation and shore transitions across biome boundaries are smooth and match
+        /// the color blending exactly. Null neighbors (grid edge) fall back to the
+        /// owning cell's UV so border corners remain well-defined.
+        ///
+        /// Because the three contributing cells are the same three regardless of which
+        /// hex visits the corner first, the result is deterministic — identical to the
+        /// determinism guarantee described in WorldTerrainBuilder.BuildCombinedMesh.
+        /// </summary>
+        public static Vector2 BlendCornerUV(HexCell cell, HexCell neighbor1, HexCell neighbor2)
+        {
+            Vector2 u0 = GetCellUV(cell);
+            Vector2 u1 = neighbor1 != null ? GetCellUV(neighbor1) : u0;
+            Vector2 u2 = neighbor2 != null ? GetCellUV(neighbor2) : u0;
+
+            // Same dominant-cell weighting as BlendCornerColor.
+            float totalWeight = 1f + NeighborWeight + NeighborWeight;
+            return (u0 * 1f + u1 * NeighborWeight + u2 * NeighborWeight) / totalWeight;
         }
 
         // =====================================================================
