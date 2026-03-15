@@ -53,9 +53,10 @@ namespace Mystpath
         /// the spawner's own density multiplier.
         /// </summary>
         [Tooltip("Probability this slot actually spawns a prop. Combined with " +
-                 "BiomePropSet.GlobalDensityMultiplier.")]
+                 "BiomePropSet.GlobalDensityMultiplier and WorldPropSpawner._globalDensityMultiplier. " +
+                 "For a management-camera game: trees 0.55, rocks 0.45, bushes 0.65, grass 0.75.")]
         [Range(0f, 1f)]
-        public float SpawnChance = 0.5f;
+        public float SpawnChance = 0.6f;
 
         // =====================================================================
         // Scale

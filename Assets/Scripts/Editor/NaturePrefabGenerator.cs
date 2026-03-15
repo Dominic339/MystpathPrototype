@@ -140,77 +140,82 @@ namespace Mystpath.Editor
         // feel of each prop type globally.
         private static readonly Category[] Categories =
         {
-            // Scale note: these minScale/maxScale values are per-entry defaults used by
-            // ValidateAndFixBiomePropSets.  At runtime they are further multiplied by
-            // WorldPropSpawner._globalScaleMultiplier (default 2×), so a minScale of 1.0
-            // produces a final world-space scale of 2× the model's native unit size.
-            // Tune _globalScaleMultiplier in the Inspector for camera-distance readability
-            // without touching individual BiomePropSet assets.
+            // Scale and SpawnChance note:
+            //   These per-entry defaults are applied by ValidateAndFixBiomePropSets only for
+            //   entries whose values are zero — existing non-zero values are left untouched.
+            //
+            //   minScale/maxScale are multiplied by WorldPropSpawner._globalScaleMultiplier
+            //   (default 3.5) at runtime, so minScale=1.0 → 3.5 world units.
+            //
+            //   SpawnChance targets a management/kingdom-builder camera where biome identity
+            //   must be readable from altitude. Higher values (0.55–0.75) are appropriate
+            //   because props need to populate the surface visually at strategy zoom.
+            //   Per-biome tuning uses BiomePropSet.GlobalDensityMultiplier instead of these.
 
-            // Ore outcrops — rare, clumped, high visual interest but low density.
+            // Ore outcrops — rare landmarks, not meant to carpet biomes.
             new Category("OreOutcrops",
                 new[] { "ore_vein", "vein", "outcrop", "mineral", "ore" },
                 ColliderShape.Box, isHarvestable: true,
                 ResourceType.Copper, minYield: 1, maxYield: 3, maxCount: 2,
-                spawnWeight: 1.5f, spawnChance: 0.15f, minScale: 1.0f, maxScale: 1.5f),
+                spawnWeight: 1.5f, spawnChance: 0.20f, minScale: 1.0f, maxScale: 1.5f),
 
-            // Trees — dominant in forested biomes, moderate in others.
+            // Trees — backbone of forest/swamp identity; need high coverage to read clearly.
             new Category("Trees",
                 new[] { "tree", "pine", "oak", "fir", "birch", "spruce",
                          "willow", "palm", "conifer", "maple", "cedar" },
                 ColliderShape.Capsule, isHarvestable: true,
                 ResourceType.Wood, minYield: 3, maxYield: 8, maxCount: 1,
-                spawnWeight: 3.0f, spawnChance: 0.35f, minScale: 1.0f, maxScale: 1.5f),
+                spawnWeight: 3.0f, spawnChance: 0.55f, minScale: 1.0f, maxScale: 1.5f),
 
-            // Rocks — visible landmarks, less frequent than vegetation.
+            // Rocks — critical for mountain and desert visual identity; need visible density.
             new Category("Rocks",
                 new[] { "rock", "stone", "boulder", "cliff", "pebble" },
                 ColliderShape.Box, isHarvestable: true,
                 ResourceType.Stone, minYield: 1, maxYield: 4, maxCount: 2,
-                spawnWeight: 2.0f, spawnChance: 0.22f, minScale: 0.9f, maxScale: 1.5f),
+                spawnWeight: 2.0f, spawnChance: 0.45f, minScale: 0.9f, maxScale: 1.5f),
 
-            // Bushes — frequent understorey, high density acceptable.
+            // Bushes — common mid-level clutter; keeps grassland from looking barren.
             new Category("Bushes",
                 new[] { "bush", "shrub", "brush", "hedge", "berry" },
                 ColliderShape.Capsule, isHarvestable: true,
                 ResourceType.Fiber, minYield: 1, maxYield: 2, maxCount: 1,
-                spawnWeight: 4.0f, spawnChance: 0.45f, minScale: 0.8f, maxScale: 1.2f),
+                spawnWeight: 4.0f, spawnChance: 0.65f, minScale: 0.8f, maxScale: 1.2f),
 
-            // Desert plants — moderate density, distinctive silhouettes.
+            // Desert plants — define desert identity; sparse but each instance must be visible.
             new Category("Desert",
                 new[] { "cactus", "agave", "desert", "succulent", "drygrass",
                          "sand_plant", "sandplant" },
                 ColliderShape.Capsule, isHarvestable: true,
                 ResourceType.Fiber, minYield: 1, maxYield: 2, maxCount: 1,
-                spawnWeight: 3.5f, spawnChance: 0.40f, minScale: 0.9f, maxScale: 1.4f),
+                spawnWeight: 3.5f, spawnChance: 0.60f, minScale: 0.9f, maxScale: 1.4f),
 
-            // Reeds — dense along shore/swamp cells.
+            // Reeds — core prop for shore and swamp; needs dense coverage near water.
             new Category("Reeds",
                 new[] { "reed", "cattail", "bulrush", "watergrass" },
                 ColliderShape.Box, isHarvestable: true,
                 ResourceType.Fiber, minYield: 1, maxYield: 3, maxCount: 1,
-                spawnWeight: 4.0f, spawnChance: 0.50f, minScale: 0.8f, maxScale: 1.2f),
+                spawnWeight: 4.0f, spawnChance: 0.70f, minScale: 0.8f, maxScale: 1.2f),
 
-            // Ground plants and flowers — filler vegetation, common.
+            // Ground plants and flowers — common underbrush; fills gaps between trees and rocks.
             new Category("Plants",
                 new[] { "flower", "plant", "herb", "fern", "weed" },
                 ColliderShape.Capsule, isHarvestable: true,
                 ResourceType.Fiber, minYield: 1, maxYield: 2, maxCount: 1,
-                spawnWeight: 4.0f, spawnChance: 0.45f, minScale: 0.8f, maxScale: 1.2f),
+                spawnWeight: 4.0f, spawnChance: 0.65f, minScale: 0.8f, maxScale: 1.2f),
 
-            // Debris — fallen logs, stumps, driftwood. Rare and atmospheric.
+            // Debris — fallen logs / stumps; atmospheric atmosphere prop, stays intentionally rare.
             new Category("Debris",
                 new[] { "log", "stump", "driftwood", "debris" },
                 ColliderShape.Box, isHarvestable: true,
                 ResourceType.Wood, minYield: 1, maxYield: 3, maxCount: 1,
-                spawnWeight: 1.0f, spawnChance: 0.08f, minScale: 1.0f, maxScale: 1.5f),
+                spawnWeight: 1.0f, spawnChance: 0.22f, minScale: 1.0f, maxScale: 1.5f),
 
-            // Ground cover grass — most common, cheapest to render; very high density.
+            // Ground cover grass — cheapest prop; used as base filler in almost every biome.
             new Category("Grass",
                 new[] { "grass", "tuft", "groundcover" },
                 ColliderShape.Box, isHarvestable: false,
                 ResourceType.None,
-                spawnWeight: 5.0f, spawnChance: 0.55f, minScale: 0.7f, maxScale: 1.1f),
+                spawnWeight: 5.0f, spawnChance: 0.75f, minScale: 0.7f, maxScale: 1.1f),
 
             // Catch-all for anything not matched above.
             // Placed last so it only applies to unclassified models.
@@ -218,7 +223,7 @@ namespace Mystpath.Editor
                 new[] { "" },   // empty keyword matches anything
                 ColliderShape.Box, isHarvestable: false,
                 ResourceType.None,
-                spawnWeight: 1.0f, spawnChance: 0.20f, minScale: 1.0f, maxScale: 1.5f),
+                spawnWeight: 1.0f, spawnChance: 0.40f, minScale: 1.0f, maxScale: 1.5f),
         };
 
         // =====================================================================
@@ -616,14 +621,29 @@ namespace Mystpath.Editor
             EnsureFolder(SoRoot);
 
             // Biomes to create sets for, together with their default density settings.
+            //
+            // Slot counts and density are tuned for a management/kingdom-builder camera
+            // where biome identity must be readable from altitude on a ~200×200 hex world.
+            //
+            // Effective spawn chance per slot = entry.SpawnChance × density × globalDensity.
+            // At the spawner's default globalDensity=1.5 and a typical entry SpawnChance=0.6:
+            //   Forest:    7 slots × (0.6 × 1.2 × 1.5) ≈ 7 × 1.08 → ~6.5 props/hex (lush)
+            //   Grassland: 5 slots × (0.6 × 1.0 × 1.5) ≈ 5 × 0.90 → ~4.5 props/hex
+            //   Desert:    3 slots × (0.6 × 0.6 × 1.5) ≈ 3 × 0.54 → ~1.6 props/hex (sparse)
+            //   Mountain:  4 slots × (0.6 × 0.8 × 1.5) ≈ 4 × 0.72 → ~2.9 props/hex
+            //   Tundra:    3 slots × (0.6 × 0.6 × 1.5) ≈ 3 × 0.54 → ~1.6 props/hex (sparse)
+            //   Swamp:     8 slots × (0.6 × 1.1 × 1.5) ≈ 8 × 0.99 → ~7.9 props/hex (dense)
+            //
+            // Biome identity hierarchy (most→least dense):  Swamp > Forest > Grassland > Mountain > Desert ≈ Tundra
+            // Tune WorldPropSpawner._globalDensityMultiplier to shift all biomes together.
             var biomeDefaults = new (BiomeType biome, int slots, float density)[]
             {
-                (BiomeType.Forest,    6, 1.2f),
-                (BiomeType.Grassland, 4, 0.8f),
-                (BiomeType.Desert,    2, 0.4f),
-                (BiomeType.Mountain,  3, 0.7f),
-                (BiomeType.Tundra,    3, 0.6f),
-                (BiomeType.Swamp,     5, 1.0f),
+                (BiomeType.Forest,    7, 1.2f),  // lush — trees dominate, clearly forested
+                (BiomeType.Grassland, 5, 1.0f),  // adequately populated — not barren
+                (BiomeType.Desert,    3, 0.6f),  // sparse — each cactus/rock stands out
+                (BiomeType.Mountain,  4, 0.8f),  // rocky — enough boulders to read as highland
+                (BiomeType.Tundra,    3, 0.6f),  // cold/sparse — mirrors desert feel
+                (BiomeType.Swamp,     8, 1.1f),  // densest — overgrown, cluttered look
             };
 
             int created = 0;
@@ -654,8 +674,8 @@ namespace Mystpath.Editor
                 var shoreSet = ScriptableObject.CreateInstance<BiomePropSet>();
                 shoreSet.name                   = "BiomePropSet_Shore";
                 shoreSet.IsShoreSpecificSet     = true;
-                shoreSet.SlotsPerHex            = 2;
-                shoreSet.GlobalDensityMultiplier = 0.5f;
+                shoreSet.SlotsPerHex            = 3;   // 3 slots gives distinct shoreline clutter
+                shoreSet.GlobalDensityMultiplier = 0.75f; // lighter than land biomes, still visible
                 AssetDatabase.CreateAsset(shoreSet, shorePath);
                 created++;
             }
