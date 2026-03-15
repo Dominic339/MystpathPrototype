@@ -69,6 +69,19 @@ namespace Mystpath
         [ContextMenu("Generate World (Current Seed)")]
         public void GenerateWorld()
         {
+            // Auto-resolve HexGrid if the inspector reference was not assigned.
+            // Checks the same GameObject first, then falls back to a scene-wide search.
+            if (_hexGrid == null)
+                _hexGrid = GetComponent<HexGrid>() ?? FindFirstObjectByType<HexGrid>();
+
+            if (_hexGrid == null)
+            {
+                Debug.LogError("[WorldGenerator] HexGrid reference is not assigned and could " +
+                               "not be found in the scene. Generation aborted. " +
+                               "Add a HexGrid component to the same GameObject or scene.");
+                return;
+            }
+
             _terrainFeatures.Clear();
             _mountainCenters.Clear();
 

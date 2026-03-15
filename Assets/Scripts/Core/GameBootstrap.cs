@@ -20,7 +20,15 @@ namespace Mystpath
 
         private void Awake()
         {
-            // TODO: Validate all required inspector references before proceeding
+            // Auto-resolve references if not wired in the inspector.
+            // FindFirstObjectByType is safe here — all MonoBehaviours are instantiated
+            // before any Awake is called, so other components are already present.
+            if (_worldGenerator == null)
+                _worldGenerator = FindFirstObjectByType<WorldGenerator>();
+
+            if (_gameManager == null)
+                _gameManager = FindFirstObjectByType<GameManager>();
+
             // TODO: Determine whether to start a new game or restore a save file
             InitializeSystems();
         }
