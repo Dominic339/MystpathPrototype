@@ -12,12 +12,18 @@ namespace Mystpath
     ///   - Each HexCell contributes seven vertices (center + six corners) to a single
     ///     combined mesh. Vertices are NOT shared across hex boundaries, giving a
     ///     clean low-poly stylized look consistent with the strategy-game aesthetic.
-    ///   - Corner vertex heights are the average of the three cells that share that corner
-    ///     (owning cell + two axially adjacent neighbors). This prevents height cracks
-    ///     at hex borders without requiring a shared vertex buffer.
-    ///   - Corner vertex colors are blended by BiomeBlendCalculator so biome borders
-    ///     have a soft gradient rather than hard pixel edges.
-    ///   - Water cells sit at a capped low elevation, colored by WaterDepth.
+    ///
+    /// Corner height/color correctness:
+    ///   Corner i of a flat-top hex (at angle 60*i°) is the meeting point of three cells:
+    ///   the owning cell, and the neighbors at axial directions (6-i)%6 and (7-i)%6.
+    ///   Both the height and the blended color for each corner are averaged over those
+    ///   three specific cells. Because every adjacent hex that shares a corner computes
+    ///   the same average (same three cells, same formula), the resulting vertex heights
+    ///   are identical at every shared position, producing a seamless continuous surface.
+    ///
+    ///   The incorrect formula used previously (dirs i and (i+1)%6) only happens to be
+    ///   right for corners 0 and 3. For the remaining four corners it uses the wrong
+    ///   neighbors, producing mismatched heights and the visible disconnected-plate look.
     ///
     /// Subscribes to WorldGenerator.OnWorldGenerated so terrain rebuilds automatically
     /// whenever the world is regenerated, including R / N debug hotkeys.
@@ -230,8 +236,8 @@ namespace Mystpath
                     float cornerY = CornerHeight(cell, i);
 
                     // Corner color: blend toward adjacent biome colors for smooth transitions.
-                    HexCell n1 = NeighborOrNull(cell.Coord, i);
-                    HexCell n2 = NeighborOrNull(cell.Coord, (i + 1) % 6);
+                    HexCell n1 = NeighborOrNull(cell.Coord, (6 - i) % 6);
+                    HexCell n2 = NeighborOrNull(cell.Coord, (7 - i) % 6);
                     Color   cornerColor = BiomeBlendCalculator.BlendCornerColor(cell, n1, n2);
 
                     vertices.Add(new Vector3(worldXZ.x + cx, cornerY, worldXZ.z + cz));
@@ -288,16 +294,17 @@ namespace Mystpath
 
         /// <summary>
         /// World-space Y height for corner <paramref name="cornerIndex"/> of
-        /// <paramref name="cell"/>. Averaged with the two neighbors that share this
-        /// corner so both cells produce identical heights at that position, eliminating
-        /// visible seams without a shared vertex buffer.
+        /// <paramref name="cell"/>. Corner i is the meeting point of the owning cell
+        /// and the neighbors at axial directions (6-i)%6 and (7-i)%6. Averaging those
+        /// three heights ensures every adjacent hex produces the identical value at
+        /// the shared world position, eliminating visible seams without sharing vertices.
         /// </summary>
         private float CornerHeight(HexCell cell, int cornerIndex)
         {
             float h0 = CellHeight(cell);
 
-            HexCell n1 = NeighborOrNull(cell.Coord, cornerIndex);
-            HexCell n2 = NeighborOrNull(cell.Coord, (cornerIndex + 1) % 6);
+            HexCell n1 = NeighborOrNull(cell.Coord, (6 - cornerIndex) % 6);
+            HexCell n2 = NeighborOrNull(cell.Coord, (7 - cornerIndex) % 6);
 
             float h1 = n1 != null ? CellHeight(n1) : h0;
             float h2 = n2 != null ? CellHeight(n2) : h0;
