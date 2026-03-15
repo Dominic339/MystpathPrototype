@@ -9,21 +9,29 @@ namespace Mystpath
     ///
     /// Architecture:
     ///   - The HexGrid remains the authoritative source of truth. This class only reads it.
-    ///   - Each HexCell contributes seven vertices (center + six corners) to a single
-    ///     combined mesh. Vertices are NOT shared across hex boundaries, giving a
-    ///     clean low-poly stylized look consistent with the strategy-game aesthetic.
+    ///   - The terrain is a single combined mesh. Each hex contributes one center vertex
+    ///     (unique to that hex) and six corner vertices that are SHARED with the adjacent
+    ///     hexes that meet at the same geometric point.
+    ///
+    /// Shared vertex topology and smoothing:
+    ///   Each flat-top hex corner is shared by exactly three hexes. By using one vertex
+    ///   per unique world position (via a position-keyed cache), Unity's RecalculateNormals
+    ///   can average the normals of all triangles that meet at each corner across hex
+    ///   boundaries, producing smooth normals everywhere instead of per-hex facets.
+    ///
+    ///   Hex identity is still clearly visible because:
+    ///     - Each center vertex retains its cell's pure biome color and exact elevation.
+    ///     - Corner heights and colors are averaged over the three contributing cells —
+    ///       the same value is computed regardless of which hex "claims" the corner first.
+    ///     - Biome color regions are large and distinct at the kingdom scale.
     ///
     /// Corner height/color correctness:
     ///   Corner i of a flat-top hex (at angle 60*i°) is the meeting point of three cells:
     ///   the owning cell, and the neighbors at axial directions (6-i)%6 and (7-i)%6.
     ///   Both the height and the blended color for each corner are averaged over those
     ///   three specific cells. Because every adjacent hex that shares a corner computes
-    ///   the same average (same three cells, same formula), the resulting vertex heights
-    ///   are identical at every shared position, producing a seamless continuous surface.
-    ///
-    ///   The incorrect formula used previously (dirs i and (i+1)%6) only happens to be
-    ///   right for corners 0 and 3. For the remaining four corners it uses the wrong
-    ///   neighbors, producing mismatched heights and the visible disconnected-plate look.
+    ///   the same average (same three cells, same formula), the value is identical
+    ///   regardless of which hex visits the corner first — the shared vertex is correct.
     ///
     /// Subscribes to WorldGenerator.OnWorldGenerated so terrain rebuilds automatically
     /// whenever the world is regenerated, including R / N debug hotkeys.
@@ -81,8 +89,10 @@ namespace Mystpath
         [SerializeField] private float _hexSize = 1f;
 
         [Tooltip("Vertical scale applied to BaseElevation. " +
-                 "At 4 an elevation of 1.0 becomes 4 world units above y = 0.")]
-        [SerializeField] private float _elevationScale = 4f;
+                 "At 5 an elevation of 1.0 becomes 5 world units above y = 0. " +
+                 "Mountain peaks can exceed 1.0 (up to 1.8), so peaks reach ~9 world units " +
+                 "while average land (~0.55) sits at ~2.75 — a clear visual hierarchy.")]
+        [SerializeField] private float _elevationScale = 5f;
 
         [Tooltip("Maximum elevation (before scale) used for water cell surfaces. " +
                  "Keeps water visually below all land regardless of raw elevation value.")]
@@ -222,8 +232,23 @@ namespace Mystpath
         // =====================================================================
 
         /// <summary>
-        /// Iterates all cells in the HexGrid and emits 7 vertices + 6 triangles per hex
-        /// into a single combined mesh attached to a new child GameObject.
+        /// Builds a single combined terrain mesh for the entire HexGrid.
+        ///
+        /// Vertex layout:
+        ///   Each hex contributes one unique center vertex. The six corner vertices at each
+        ///   hex corner are shared with the adjacent hexes that touch the same geometric point.
+        ///   A position-keyed dictionary (CornerKey) ensures each unique world position
+        ///   creates exactly one vertex, regardless of which hex processes it first.
+        ///
+        /// Smoothing:
+        ///   Because corner vertices are shared, Unity's RecalculateNormals averages the
+        ///   normals of every triangle that meets at each corner — producing smooth surface
+        ///   normals across hex boundaries rather than per-hex facets.
+        ///   Center vertices are still unique, so the hex-plateau gradient is preserved.
+        ///
+        /// Correctness:
+        ///   Corner height and color are averaged over the same three cells regardless of
+        ///   which hex claims the vertex first, so the value is deterministic and correct.
         /// </summary>
         private void BuildCombinedMesh()
         {
@@ -231,58 +256,68 @@ namespace Mystpath
             var colors    = new List<Color>();
             var triangles = new List<int>();
 
+            // Maps a quantized world-position key to an already-created vertex index.
+            // Corner vertices at the same geometric position share one entry in this cache.
+            var cornerCache = new Dictionary<long, int>(capacity: _hexGrid.CellCount * 3);
+
             foreach (HexCell cell in _hexGrid.GetAllCells())
             {
-                int       baseIndex  = vertices.Count;
-                Vector3   worldXZ    = cell.Coord.ToWorldPosition(_hexSize);
-                float     centerY    = CellHeight(cell);
-                Color     cellColor  = BiomeBlendCalculator.GetCellColor(cell);
+                Vector3 worldXZ   = cell.Coord.ToWorldPosition(_hexSize);
+                float   centerY   = CellHeight(cell);
+                Color   cellColor = BiomeBlendCalculator.GetCellColor(cell);
 
-                // Center vertex — pure cell color, center height.
+                // Center vertex: unique per hex, carries the cell's pure biome color.
+                int centerIdx = vertices.Count;
                 vertices.Add(new Vector3(worldXZ.x, centerY, worldXZ.z));
                 colors.Add(cellColor);
 
-                // Six corner vertices.
+                // Six corner vertices — shared with whichever neighboring hex visits
+                // the same geometric corner position first.
+                int[] cornerIdx = new int[6];
                 for (int i = 0; i < 6; i++)
                 {
                     float rad = i * 60f * Mathf.Deg2Rad;
-                    float cx  = Mathf.Cos(rad) * _hexSize;
-                    float cz  = Mathf.Sin(rad) * _hexSize;
+                    float wx  = worldXZ.x + Mathf.Cos(rad) * _hexSize;
+                    float wz  = worldXZ.z + Mathf.Sin(rad) * _hexSize;
+                    long  key = CornerKey(wx, wz);
 
-                    // Corner height: average of this cell and the two neighbors sharing it.
-                    float cornerY = CornerHeight(cell, i);
+                    if (!cornerCache.TryGetValue(key, out int idx))
+                    {
+                        // First hex to reach this corner — compute and store the vertex.
+                        HexCell n1 = NeighborOrNull(cell.Coord, (6 - i) % 6);
+                        HexCell n2 = NeighborOrNull(cell.Coord, (7 - i) % 6);
 
-                    // Corner color: blend toward adjacent biome colors for smooth transitions.
-                    HexCell n1 = NeighborOrNull(cell.Coord, (6 - i) % 6);
-                    HexCell n2 = NeighborOrNull(cell.Coord, (7 - i) % 6);
-                    Color   cornerColor = BiomeBlendCalculator.BlendCornerColor(cell, n1, n2);
+                        idx = vertices.Count;
+                        vertices.Add(new Vector3(wx, CornerHeight(cell, i), wz));
+                        colors.Add(BiomeBlendCalculator.BlendCornerColor(cell, n1, n2));
+                        cornerCache[key] = idx;
+                    }
 
-                    vertices.Add(new Vector3(worldXZ.x + cx, cornerY, worldXZ.z + cz));
-                    colors.Add(cornerColor);
+                    cornerIdx[i] = idx;
                 }
 
                 // Six triangles with CW winding viewed from +Y (front face = +Y normal).
-                // (center, next_corner, current_corner) — matches WorldDebugRenderer convention.
                 for (int i = 0; i < 6; i++)
                 {
-                    triangles.Add(baseIndex);                    // center
-                    triangles.Add(baseIndex + (i + 1) % 6 + 1); // next corner
-                    triangles.Add(baseIndex + i + 1);            // current corner
+                    triangles.Add(centerIdx);              // cell center
+                    triangles.Add(cornerIdx[(i + 1) % 6]); // next corner
+                    triangles.Add(cornerIdx[i]);            // current corner
                 }
             }
 
             var mesh = new Mesh { name = "TerrainCombined" };
 
-            // 32-bit indices support grids larger than ~93×93 (> 65 535 verts).
+            // Shared corner vertices reduce total count to roughly 1 center + 2 unique corners
+            // per hex on average (each corner shared by 3 hexes). A 96×96 grid produces
+            // ~28 000 verts — well within 16-bit range. The check is kept for safety.
             mesh.indexFormat = vertices.Count > 65535 ? IndexFormat.UInt32 : IndexFormat.UInt16;
 
             mesh.SetVertices(vertices);
             mesh.SetColors(colors);
             mesh.SetTriangles(triangles, 0);
 
-            // Smooth normals within each hex face; hex edge normals remain faceted
-            // because corner vertices are not shared across hex boundaries.
-            // TODO: Post-process normals across hex boundaries for a smoother appearance.
+            // Shared corner vertices allow RecalculateNormals to average across hex
+            // boundaries, producing smooth normals everywhere on the terrain surface.
             mesh.RecalculateNormals();
             mesh.RecalculateBounds();
 
@@ -290,6 +325,25 @@ namespace Mystpath
             go.transform.SetParent(_terrainRoot.transform, worldPositionStays: false);
             go.AddComponent<MeshFilter>().sharedMesh      = mesh;
             go.AddComponent<MeshRenderer>().sharedMaterial = _terrainMaterial;
+        }
+
+        /// <summary>
+        /// Returns a stable long key for a world-space corner position.
+        /// Rounds to 3 decimal places — sufficient to uniquely distinguish all hex corner
+        /// positions for any hex size ≥ 0.01. A fixed offset is added before packing so
+        /// small negative coordinates (possible at the grid boundary) remain non-negative.
+        /// </summary>
+        private static long CornerKey(float x, float z)
+        {
+            // With hexSize = 1 and a 96-hex grid:
+            //   max x ≈ 144, max z ≈ 166; min x/z ≈ −1 (one hex-size border corner).
+            //   At 1000× precision: xi/zi up to ~167 000.  offset = 10 000 is safe.
+            //   Multiplier 500 000 > max zi, so xi * 500 000 + zi has no collisions.
+            const long offset     = 10_000L;
+            const long multiplier = 500_000L;
+            long xi = (long)Mathf.Round(x * 1000f) + offset;
+            long zi = (long)Mathf.Round(z * 1000f) + offset;
+            return xi * multiplier + zi;
         }
 
         // =====================================================================
@@ -313,9 +367,9 @@ namespace Mystpath
         /// <summary>
         /// World-space Y height for corner <paramref name="cornerIndex"/> of
         /// <paramref name="cell"/>. Corner i is the meeting point of the owning cell
-        /// and the neighbors at axial directions (6-i)%6 and (7-i)%6. Averaging those
-        /// three heights ensures every adjacent hex produces the identical value at
-        /// the shared world position, eliminating visible seams without sharing vertices.
+        /// and the neighbors at axial directions (6-i)%6 and (7-i)%6. The average of
+        /// those three heights is the value stored in the shared corner vertex — identical
+        /// regardless of which of the three hexes computes it first.
         /// </summary>
         private float CornerHeight(HexCell cell, int cornerIndex)
         {

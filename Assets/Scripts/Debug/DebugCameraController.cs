@@ -12,6 +12,7 @@ namespace Mystpath
     ///
     /// Controls:
     ///   WASD / Arrow keys  — pan across the world (moves the camera pivot)
+    ///   Q / E              — rotate the camera left / right around the current pivot
     ///   Middle mouse drag  — pan (click-drag on the world surface)
     ///   Right mouse drag   — pan (click-drag on the world surface)
     ///   Scroll wheel       — zoom in/out by moving the camera along its view axis
@@ -64,6 +65,10 @@ namespace Mystpath
 
         [Tooltip("Drag sensitivity for middle/right mouse pan. Lower = faster.")]
         [SerializeField] private float _mousePanSensitivity = 0.012f;
+
+        [Header("Rotation")]
+        [Tooltip("Yaw rotation speed in degrees per second when Q or E is held.")]
+        [SerializeField] private float _rotationSpeed = 60f;
 
         [Header("Zoom")]
         [Tooltip("Zoom speed multiplier. Proportional to current distance.")]
@@ -121,6 +126,7 @@ namespace Mystpath
         private void Update()
         {
             HandleKeyPan();
+            HandleKeyRotation();
             HandleMouseDragPan();
             HandleScrollZoom();
             ClampPivotToBounds();
@@ -174,6 +180,23 @@ namespace Mystpath
             if (Input.GetKey(KeyCode.S) || Input.GetKey(KeyCode.DownArrow))  _pivot -= forward * speed;
             if (Input.GetKey(KeyCode.A) || Input.GetKey(KeyCode.LeftArrow))  _pivot -= right   * speed;
             if (Input.GetKey(KeyCode.D) || Input.GetKey(KeyCode.RightArrow)) _pivot += right   * speed;
+        }
+
+        // =====================================================================
+        // Input — Q/E Keyboard Rotation
+        // =====================================================================
+
+        private void HandleKeyRotation()
+        {
+            // Q rotates the camera counter-clockwise around the pivot; E clockwise.
+            // Rotation is applied to _yawAngle and reflected immediately in FlatForward()
+            // so keyboard pan direction tracks the new orientation without any extra logic.
+            float rotDir = 0f;
+            if (Input.GetKey(KeyCode.Q)) rotDir -= 1f;
+            if (Input.GetKey(KeyCode.E)) rotDir += 1f;
+            if (Mathf.Approximately(rotDir, 0f)) return;
+
+            _yawAngle += rotDir * _rotationSpeed * Time.deltaTime;
         }
 
         // =====================================================================
