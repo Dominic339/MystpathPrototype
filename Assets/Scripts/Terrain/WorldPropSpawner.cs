@@ -84,16 +84,27 @@ namespace Mystpath
         [SerializeField] private float _hexSize = 1f;
 
         [Tooltip("Global multiplier applied on top of all per-entry spawn chances. " +
-                 "Use < 1 to thin out props globally, > 1 to densify. " +
-                 "1.0 = use BiomePropSet values as-is.")]
-        [SerializeField, Range(0f, 2f)] private float _globalDensityMultiplier = 1f;
+                 "Effective spawn chance per slot = entry.SpawnChance × set.GlobalDensityMultiplier × this. " +
+                 "Values above 1.0 densify the world; the formula clamps naturally at 1.0 so " +
+                 "setting this to 2.0 with SpawnChance=0.5 gives 100% fill on those slots. " +
+                 "Tuning guide for a 200×200 management-camera world: " +
+                 "  1.0 = sparse prototype look (few props visible from above). " +
+                 "  1.5 = target baseline — biomes are clearly populated. " +
+                 "  2.0 = dense / overgrown feel. " +
+                 "  3.0+ = extreme — only useful for swamp/dense forest biomes. " +
+                 "Per-biome tuning uses BiomePropSet.GlobalDensityMultiplier instead.")]
+        [SerializeField, Range(0f, 4f)] private float _globalDensityMultiplier = 1.5f;
 
         [Header("Scale & Readability")]
         [Tooltip("Global scale multiplier applied on top of every per-entry scale range. " +
-                 "Increase for readability from a zoomed-out management camera — try 2–4. " +
-                 "Does not alter BiomePropSet assets; safe to tweak freely at runtime. " +
-                 "1.0 = use BiomePropEntry.MinScale / MaxScale values as-is.")]
-        [SerializeField, Range(0.1f, 10f)] private float _globalScaleMultiplier = 2f;
+                 "At hexSize=1 a 200×200 world is 200 units across. Props need to be " +
+                 "≥3 world units to be visible from a management camera at altitude 150–250. " +
+                 "Tuning guide (entry default MinScale=1, MaxScale=1.5, avg=1.25): " +
+                 "  2.0 = 2.5 units avg — borderline visible, small blobs. " +
+                 "  3.5 = 4.4 units avg — clearly readable from kingdom-builder camera. " +
+                 "  5.0 = 6.25 units avg — large, dramatic; good for hero props. " +
+                 "Does not alter BiomePropSet assets; safe to tweak freely at runtime.")]
+        [SerializeField, Range(0.1f, 10f)] private float _globalScaleMultiplier = 3.5f;
 
         [Header("Large-World Performance")]
         [Tooltip("Hard cap on the total number of spawned props across the whole world. " +

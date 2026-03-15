@@ -86,16 +86,23 @@ namespace Mystpath
         /// or fails its spawn chance, so higher slot counts with low per-entry
         /// chances create natural spacing.
         ///
-        /// Recommended values:
-        ///   Dense forest  : 6–8
-        ///   Grassland     : 3–4
-        ///   Desert        : 1–2
-        ///   Mountain      : 2–3
+        /// Recommended values for a management-camera kingdom builder:
+        ///   Swamp / dense forest : 7–10
+        ///   Forest               : 6–8
+        ///   Grassland            : 5–6
+        ///   Mountain             : 4–5
+        ///   Desert / Tundra      : 3–4
+        ///   Shore (specific set) : 2–3
+        ///
+        /// More slots = denser prop coverage but more Instantiate calls per cell.
+        /// Use WorldPropSpawner._globalDensityMultiplier to tune density globally first,
+        /// then use SlotsPerHex for per-biome identity differences.
         /// </summary>
         [Tooltip("Candidate spawn positions tested per hex cell. " +
-                 "More slots = denser world (modulated by per-entry SpawnChance).")]
-        [Range(1, 8)]
-        public int SlotsPerHex = 4;
+                 "More slots = denser world (modulated by per-entry SpawnChance). " +
+                 "For a management-camera game: Forest 7–8, Grassland 5–6, Desert 3–4.")]
+        [Range(1, 12)]
+        public int SlotsPerHex = 6;
 
         /// <summary>
         /// Multiplier applied to every entry's <see cref="BiomePropEntry.SpawnChance"/>
