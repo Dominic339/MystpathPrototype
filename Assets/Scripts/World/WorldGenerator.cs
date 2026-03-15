@@ -6,11 +6,28 @@ namespace Mystpath
     /// <summary>
     /// Responsible for procedurally generating the initial world state from a seed.
     /// Populates the HexGrid with biomes, elevations, water, terrain features, and hidden
-    /// resources in a series of deterministic layered passes.
+    /// underground resources in a series of deterministic layered passes.
     ///
     /// Generation is fully deterministic: the same seed always produces the same world.
     /// Per-cell variation uses either Perlin noise (with seed-derived offsets) or a
     /// coordinate-hash function, so output is independent of dictionary iteration order.
+    ///
+    /// Hidden resource model (Pass 6):
+    ///   HiddenResourceWeights represents underground or extractor-style deposits only.
+    ///   Food-like resources (RawFood, Grain, Fish) are intentionally absent — they come
+    ///   from visible surface props (PropSpawner), managed buildings (farms, fisheries),
+    ///   or player-controlled production zones, never from underground seeding.
+    ///   Surface raw materials like Wood are also excluded; those come from prop objects.
+    ///
+    ///   Underground resources seeded here:
+    ///     Clay       — shallow alluvial deposits (grassland, swamp, lowlands)
+    ///     Copper     — common metal ore (forest hills, foothills)
+    ///     Tin        — common metal ore (desert, hills)
+    ///     Iron       — mid-tier ore (mountain foothills, tundra)
+    ///     Coal       — fuel ore (tundra belt, mid-mountain)
+    ///     Silver     — precious ore (high mountain)
+    ///     Gold       — precious ore (high mountain peaks, very rare)
+    ///     MysticOre  — magical trace mineral (rare; progression-gated)
     ///
     /// Does NOT generate terrain meshes — that is WorldTerrainBuilder's job.
     /// </summary>
@@ -20,22 +37,29 @@ namespace Mystpath
         [SerializeField] private HexGrid _hexGrid;
 
         [Header("World Dimensions")]
-        [SerializeField] private int _worldWidth  = 48;
-        [SerializeField] private int _worldHeight = 48;
+        [Tooltip("Grid width in hexes. 96 gives a large kingdom-scale playfield " +
+                 "while remaining fast to generate in prototype form.")]
+        [SerializeField] private int _worldWidth  = 96;
+        [Tooltip("Grid height in hexes. Should match width for a roughly square map.")]
+        [SerializeField] private int _worldHeight = 96;
 
         [Header("Generation Settings")]
         [SerializeField] private int _seed = 42;
 
         [Header("Elevation")]
-        [Tooltip("Perlin noise scale for elevation. Smaller = broader terrain features.")]
-        [SerializeField] private float _elevationNoiseScale = 0.05f;
+        [Tooltip("Perlin noise scale for elevation. Smaller = broader terrain features " +
+                 "and larger biome regions. 0.028 produces wide continent-scale landmasses.")]
+        [SerializeField] private float _elevationNoiseScale = 0.028f;
 
-        [Tooltip("Elevation values below this threshold become ocean/water.")]
+        [Tooltip("Elevation values below this threshold become ocean/water. " +
+                 "0.38 gives roughly 35-40 % ocean coverage on an average seed.")]
         [SerializeField, Range(0.2f, 0.6f)] private float _waterThreshold = 0.38f;
 
         [Header("Mountain Features")]
-        [SerializeField, Range(1, 8)] private int _mountainCount = 2;
-        [SerializeField, Range(1, 6)] private int _mountainRadius = 3;
+        [Tooltip("Number of mountain ranges stamped into the world.")]
+        [SerializeField, Range(1, 12)] private int _mountainCount = 4;
+        [Tooltip("Hex radius of each mountain feature. Larger = wider ranges.")]
+        [SerializeField, Range(2, 10)] private int _mountainRadius = 5;
 
         // --- Public Output ---
 
@@ -364,9 +388,21 @@ namespace Mystpath
         }
 
         /// <summary>
-        /// Pass 6: Seeds hidden resource weights on each cell.
+        /// Pass 6: Seeds hidden underground resource weights on each cell.
+        ///
+        /// Only extractor/underground materials are seeded here (Clay, Copper, Tin, Iron,
+        /// Coal, Silver, Gold, MysticOre). Surface food (RawFood, Grain, Fish) and surface
+        /// raw materials (Wood, Fiber) are intentionally absent — those will come from
+        /// visible world props, managed production buildings, and fishery structures,
+        /// not from underground deposits.
+        ///
         /// Uses CellHash for deterministic per-cell variation that is independent of
         /// dictionary iteration order — weights are the same no matter when the cell is visited.
+        ///
+        /// Weight range semantics:
+        ///   0.00 – 0.20  : trace / marginal deposit (yields only with dedicated effort)
+        ///   0.20 – 0.50  : moderate deposit (viable quarry/mine site)
+        ///   0.50 – 1.00  : rich deposit (high-value extraction target)
         /// </summary>
         private void RunResourceWeightPass()
         {
@@ -380,47 +416,64 @@ namespace Mystpath
                 switch (cell.Biome)
                 {
                     case BiomeType.Grassland:
-                        w[ResourceType.RawFood] = Remap(0.50f, 0.90f, CellHash(q, r, 0));
-                        w[ResourceType.Grain]   = Remap(0.30f, 0.80f, CellHash(q, r, 1));
-                        w[ResourceType.Clay]    = Remap(0.10f, 0.40f, CellHash(q, r, 2));
-                        w[ResourceType.Stone]   = Remap(0.00f, 0.15f, CellHash(q, r, 3));
+                        // Lowland alluvial soil: Clay deposits are common.
+                        // Copper traces appear near sub-surface rock layers.
+                        w[ResourceType.Clay]   = Remap(0.25f, 0.65f, CellHash(q, r, 0));
+                        w[ResourceType.Copper] = Remap(0.00f, 0.20f, CellHash(q, r, 1));
                         break;
 
                     case BiomeType.Forest:
-                        w[ResourceType.Wood]    = Remap(0.60f, 1.00f, CellHash(q, r, 0));
-                        w[ResourceType.RawFood] = Remap(0.15f, 0.45f, CellHash(q, r, 1));
-                        w[ResourceType.Fiber]   = Remap(0.20f, 0.60f, CellHash(q, r, 2));
-                        w[ResourceType.Stone]   = Remap(0.00f, 0.18f, CellHash(q, r, 3));
+                        // Forest soils over older rock; Clay and Copper present.
+                        // Occasional Iron in areas of uplifted geology.
+                        w[ResourceType.Clay]   = Remap(0.15f, 0.45f, CellHash(q, r, 0));
+                        w[ResourceType.Copper] = Remap(0.10f, 0.35f, CellHash(q, r, 1));
+                        w[ResourceType.Iron]   = Remap(0.00f, 0.18f, CellHash(q, r, 2));
                         break;
 
                     case BiomeType.Desert:
-                        w[ResourceType.Stone]   = Remap(0.20f, 0.60f, CellHash(q, r, 0));
-                        w[ResourceType.Ore]     = Remap(0.10f, 0.35f, CellHash(q, r, 1));
-                        w[ResourceType.Clay]    = Remap(0.30f, 0.65f, CellHash(q, r, 2));
-                        break;
-
-                    case BiomeType.Mountain:
-                        w[ResourceType.Stone]   = Remap(0.55f, 1.00f, CellHash(q, r, 0));
-                        w[ResourceType.Ore]     = Remap(0.40f, 0.85f, CellHash(q, r, 1));
-                        w[ResourceType.Wood]    = Remap(0.00f, 0.08f, CellHash(q, r, 2));
+                        // Eroded surface exposes sub-surface rock; good for Clay and Tin.
+                        // Copper veins appear in ancient bedrock.
+                        // Rare Silver in ancient rift zones.
+                        w[ResourceType.Clay]   = Remap(0.20f, 0.55f, CellHash(q, r, 0));
+                        w[ResourceType.Tin]    = Remap(0.15f, 0.50f, CellHash(q, r, 1));
+                        w[ResourceType.Copper] = Remap(0.10f, 0.35f, CellHash(q, r, 2));
+                        w[ResourceType.Silver] = Remap(0.00f, 0.12f, CellHash(q, r, 3));
                         break;
 
                     case BiomeType.Tundra:
-                        // Foothills have significant stone and ore, small food presence.
-                        w[ResourceType.Stone]   = Remap(0.30f, 0.65f, CellHash(q, r, 0));
-                        w[ResourceType.Ore]     = Remap(0.20f, 0.55f, CellHash(q, r, 1));
-                        w[ResourceType.RawFood] = Remap(0.05f, 0.22f, CellHash(q, r, 2));
+                        // Mountain foothills — geologically active; Iron and Coal common.
+                        // Copper and Tin also present in the exposed rock belt.
+                        w[ResourceType.Iron]   = Remap(0.30f, 0.70f, CellHash(q, r, 0));
+                        w[ResourceType.Coal]   = Remap(0.25f, 0.60f, CellHash(q, r, 1));
+                        w[ResourceType.Copper] = Remap(0.15f, 0.45f, CellHash(q, r, 2));
+                        w[ResourceType.Tin]    = Remap(0.10f, 0.35f, CellHash(q, r, 3));
+                        break;
+
+                    case BiomeType.Mountain:
+                        // Core mountain: richest ore deposits in the world.
+                        // Iron and Coal are common; Silver appears in deep veins.
+                        // Gold is rare but present at high-peak cells.
+                        // MysticOre traces occur; gated behind Mystpath progression.
+                        w[ResourceType.Iron]      = Remap(0.50f, 0.95f, CellHash(q, r, 0));
+                        w[ResourceType.Coal]      = Remap(0.40f, 0.85f, CellHash(q, r, 1));
+                        w[ResourceType.Silver]    = Remap(0.15f, 0.55f, CellHash(q, r, 2));
+                        w[ResourceType.Gold]      = Remap(0.00f, 0.25f, CellHash(q, r, 3));
+                        w[ResourceType.MysticOre] = Remap(0.00f, 0.10f, CellHash(q, r, 4));
                         break;
 
                     case BiomeType.Swamp:
-                        w[ResourceType.RawFood] = Remap(0.20f, 0.50f, CellHash(q, r, 0));
-                        w[ResourceType.Wood]    = Remap(0.15f, 0.40f, CellHash(q, r, 1));
-                        w[ResourceType.Clay]    = Remap(0.30f, 0.70f, CellHash(q, r, 2));
+                        // Waterlogged lowlands: heavy Clay and peat-equivalent Coal seams.
+                        // Copper traces from ancient floodplains.
+                        w[ResourceType.Clay]   = Remap(0.40f, 0.80f, CellHash(q, r, 0));
+                        w[ResourceType.Coal]   = Remap(0.15f, 0.40f, CellHash(q, r, 1));
+                        w[ResourceType.Copper] = Remap(0.00f, 0.15f, CellHash(q, r, 2));
                         break;
 
                     case BiomeType.Ocean:
-                        // Minimal land resources; fish (represented as RawFood) are present.
-                        w[ResourceType.RawFood] = Remap(0.10f, 0.30f, CellHash(q, r, 0));
+                        // Ocean floors have no extractable underground resources in this model.
+                        // Fish and sea resources come from fishery buildings, not hidden weights.
+                        // TODO: Future — seafloor deposits (rare minerals, sand/gravel) if
+                        //       offshore extraction buildings are added.
                         break;
                 }
             }

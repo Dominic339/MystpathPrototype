@@ -3,22 +3,35 @@ using UnityEngine;
 namespace Mystpath
 {
     /// <summary>
-    /// Provides debug camera controls for inspecting the hex world in Play Mode.
+    /// Player-style angled hover camera for inspecting the hex world in Play Mode.
+    ///
+    /// Camera style:
+    ///   The camera is positioned at a fixed downward angle (think Diablo-style
+    ///   overhead-angled view) and pans across the world surface. This gives a
+    ///   readable kingdom-builder framing rather than a flat top-down debug view.
     ///
     /// Controls:
-    ///   WASD / Arrow keys  — pan across the world
-    ///   Middle mouse drag  — pan (click-drag)
-    ///   Right mouse drag   — pan (click-drag)
-    ///   Scroll wheel       — zoom in/out (adjusts orthographic size)
+    ///   WASD / Arrow keys  — pan across the world (moves the camera pivot)
+    ///   Middle mouse drag  — pan (click-drag on the world surface)
+    ///   Right mouse drag   — pan (click-drag on the world surface)
+    ///   Scroll wheel       — zoom in/out by moving the camera along its view axis
     ///
-    /// On Start, the camera automatically centres above the grid and sizes its
-    /// orthographic frustum to show the full world. Call CenterOnWorld() at any
-    /// time to return to that view.
+    /// Zoom model:
+    ///   The camera moves closer to / further from the terrain along its angled
+    ///   view direction — a perspective dolly. The pitch angle is fixed; only
+    ///   distance changes. This preserves the angled framing at all zoom levels.
+    ///
+    /// Bounds:
+    ///   Camera pivot is soft-clamped to the grid bounds so the view stays
+    ///   near the playfield.
+    ///
+    /// On Start, the camera automatically centres above the grid at a comfortable
+    /// overview distance. Call CenterOnWorld() at any time to return to that view.
     ///
     /// The WorldGenerator reference is auto-resolved from the scene if not assigned
     /// in the inspector, so no manual wiring is required for basic usage.
     ///
-    /// Requires an orthographic Camera component on the same GameObject.
+    /// Requires a Camera component on the same GameObject.
     /// Tag that GameObject "MainCamera" so WorldDebugRenderer can detect hover.
     ///
     /// TODO: Migrate input to a formal input layer when the production input system
@@ -28,31 +41,53 @@ namespace Mystpath
     public class DebugCameraController : MonoBehaviour
     {
         [Header("References")]
-        [Tooltip("Used to read grid dimensions for CenterOnWorld. " +
+        [Tooltip("Used to read grid dimensions for CenterOnWorld and pan clamping. " +
                  "Auto-found at runtime if left unassigned.")]
         [SerializeField] private WorldGenerator _worldGenerator;
 
         [Header("Hex Layout")]
-        [Tooltip("Must match WorldDebugRenderer's Hex World Size.")]
+        [Tooltip("Must match WorldDebugRenderer's Hex World Size and WorldTerrainBuilder._hexSize.")]
         [SerializeField] private float _hexWorldSize = 1.0f;
 
+        [Header("Camera Angle")]
+        [Tooltip("Pitch angle in degrees. 55 gives a Diablo-style angled overhead view " +
+                 "that reads well for a strategy game. 90 = straight down.")]
+        [SerializeField, Range(30f, 80f)] private float _pitchAngle = 55f;
+
+        [Tooltip("Yaw angle in degrees. 0 = looking along +Z. 45 gives a classic " +
+                 "isometric-flavoured orientation. Can be changed freely.")]
+        [SerializeField] private float _yawAngle = 0f;
+
         [Header("Pan")]
-        [Tooltip("World units per second when panning with keyboard.")]
-        [SerializeField] private float _keyPanSpeed = 20f;
+        [Tooltip("World units per second when panning with keyboard. Scales with zoom distance.")]
+        [SerializeField] private float _keyPanSpeed = 28f;
 
         [Tooltip("Drag sensitivity for middle/right mouse pan. Lower = faster.")]
-        [SerializeField] private float _mousePanSensitivity = 0.015f;
+        [SerializeField] private float _mousePanSensitivity = 0.012f;
 
         [Header("Zoom")]
-        [Tooltip("Zoom speed multiplier. Zoom is proportional to current size.")]
+        [Tooltip("Zoom speed multiplier. Proportional to current distance.")]
         [SerializeField] private float _zoomSpeed = 3f;
-        [SerializeField] private float _minOrthographicSize =  3f;
-        [SerializeField] private float _maxOrthographicSize = 120f;
+        [Tooltip("Minimum camera distance from terrain surface (dolly near limit).")]
+        [SerializeField] private float _minZoomDistance = 8f;
+        [Tooltip("Maximum camera distance from terrain surface (dolly far limit).")]
+        [SerializeField] private float _maxZoomDistance = 140f;
+
+        // =====================================================================
+        // Private State
+        // =====================================================================
 
         private Camera  _camera;
         private bool    _isDragging;
-        private int     _dragButton;       // which mouse button started the current drag
+        private int     _dragButton;
         private Vector3 _dragLastMousePos;
+
+        // Camera pivot: the world-space point the camera looks at.
+        // The camera itself is offset from the pivot along the inverse view direction.
+        private Vector3 _pivot;
+
+        // Current dolly distance from the pivot to the camera position.
+        private float _zoomDistance;
 
         private static readonly float Sqrt3 = Mathf.Sqrt(3f);
 
@@ -63,20 +98,22 @@ namespace Mystpath
         private void Awake()
         {
             _camera = GetComponent<Camera>();
-            _camera.orthographic = true;
+
+            // Use perspective projection for an angled 3D view.
+            _camera.orthographic = false;
+            if (_camera.fieldOfView < 1f) _camera.fieldOfView = 50f;
         }
 
         private void Start()
         {
             // Auto-resolve WorldGenerator if not wired in the inspector.
-            // Done in Start (not Awake) so GameBootstrap.Awake has already run
-            // and the generator exists with an initialised grid.
+            // Done in Start so GameBootstrap.Awake has already run.
             if (_worldGenerator == null)
                 _worldGenerator = FindFirstObjectByType<WorldGenerator>();
 
             if (_worldGenerator == null)
                 Debug.LogWarning("[DebugCameraController] WorldGenerator not found. " +
-                                 "Camera will centre on a default 48×48 grid.");
+                                 "Camera will centre on a default 96×96 grid.");
 
             CenterOnWorld();
         }
@@ -86,6 +123,8 @@ namespace Mystpath
             HandleKeyPan();
             HandleMouseDragPan();
             HandleScrollZoom();
+            ClampPivotToBounds();
+            ApplyCameraTransform();
         }
 
         // =====================================================================
@@ -93,29 +132,29 @@ namespace Mystpath
         // =====================================================================
 
         /// <summary>
-        /// Repositions the camera directly above the grid centre and adjusts the
-        /// orthographic size so the full world is visible. Safe to call at any time.
+        /// Repositions the camera pivot above the grid centre at a comfortable overview
+        /// distance for the current grid size. Safe to call at any time.
         /// </summary>
         public void CenterOnWorld()
         {
-            // Use null-propagation so a missing Grid (before generation) falls back safely.
-            int gridWidth  = _worldGenerator?.Grid?.Width  ?? 48;
-            int gridHeight = _worldGenerator?.Grid?.Height ?? 48;
+            int gridWidth  = _worldGenerator?.Grid?.Width  ?? 96;
+            int gridHeight = _worldGenerator?.Grid?.Height ?? 96;
 
-            // World-space centre derived from the middle axial coordinate.
-            Vector3 center = new HexCoord(gridWidth / 2, gridHeight / 2)
-                                 .ToWorldPosition(_hexWorldSize);
+            // World-space centre of the grid.
+            Vector3 worldCenter = new HexCoord(gridWidth / 2, gridHeight / 2)
+                                      .ToWorldPosition(_hexWorldSize);
 
-            // Camera sits directly above the grid, looking straight down.
-            transform.position = new Vector3(center.x, 60f, center.z);
-            transform.rotation = Quaternion.Euler(90f, 0f, 0f);
+            // Pivot sits at terrain level at the grid centre.
+            _pivot = new Vector3(worldCenter.x, 0f, worldCenter.z);
 
-            // Orthographic size = half the visible vertical world extent.
-            // Full grid height ≈ gridHeight × sqrt(3) × hexSize; 0.55 adds a small margin.
-            _camera.orthographicSize = Mathf.Clamp(
-                gridHeight * Sqrt3 * _hexWorldSize * 0.55f,
-                _minOrthographicSize,
-                _maxOrthographicSize);
+            // Start far enough back to see the full map.
+            // Full world diameter ≈ gridWidth * hexSize * sqrt(3).
+            float worldDiameter = gridWidth * _hexWorldSize * Sqrt3;
+            _zoomDistance = Mathf.Clamp(worldDiameter * 0.60f,
+                                        _minZoomDistance,
+                                        _maxZoomDistance);
+
+            ApplyCameraTransform();
         }
 
         // =====================================================================
@@ -124,16 +163,17 @@ namespace Mystpath
 
         private void HandleKeyPan()
         {
-            // Scale key speed by zoom level so panning feels consistent at all scales.
-            float speed = _keyPanSpeed * Time.deltaTime * (_camera.orthographicSize / 20f);
-            Vector3 move = Vector3.zero;
+            // Scale speed by zoom distance so panning feels proportional at all zoom levels.
+            float speed = _keyPanSpeed * Time.deltaTime * (_zoomDistance / 30f);
 
-            if (Input.GetKey(KeyCode.W) || Input.GetKey(KeyCode.UpArrow))    move.z += speed;
-            if (Input.GetKey(KeyCode.S) || Input.GetKey(KeyCode.DownArrow))  move.z -= speed;
-            if (Input.GetKey(KeyCode.A) || Input.GetKey(KeyCode.LeftArrow))  move.x -= speed;
-            if (Input.GetKey(KeyCode.D) || Input.GetKey(KeyCode.RightArrow)) move.x += speed;
+            // Pan in the XZ plane along the camera's left/forward vectors projected flat.
+            Vector3 forward = FlatForward();
+            Vector3 right   = Vector3.Cross(Vector3.up, forward).normalized;
 
-            transform.position += move;
+            if (Input.GetKey(KeyCode.W) || Input.GetKey(KeyCode.UpArrow))    _pivot += forward * speed;
+            if (Input.GetKey(KeyCode.S) || Input.GetKey(KeyCode.DownArrow))  _pivot -= forward * speed;
+            if (Input.GetKey(KeyCode.A) || Input.GetKey(KeyCode.LeftArrow))  _pivot -= right   * speed;
+            if (Input.GetKey(KeyCode.D) || Input.GetKey(KeyCode.RightArrow)) _pivot += right   * speed;
         }
 
         // =====================================================================
@@ -142,7 +182,6 @@ namespace Mystpath
 
         private void HandleMouseDragPan()
         {
-            // Begin a drag with middle (2) or right (1) mouse button.
             if (!_isDragging)
             {
                 if (Input.GetMouseButtonDown(2) || Input.GetMouseButtonDown(1))
@@ -154,7 +193,6 @@ namespace Mystpath
                 return;
             }
 
-            // End drag when the button is released.
             if (Input.GetMouseButtonUp(_dragButton))
             {
                 _isDragging = false;
@@ -164,14 +202,18 @@ namespace Mystpath
             Vector3 delta = Input.mousePosition - _dragLastMousePos;
             _dragLastMousePos = Input.mousePosition;
 
-            // Scale pan distance by the orthographic size so the drag distance in world
-            // space stays proportional to the current zoom level.
-            float scale = _camera.orthographicSize * _mousePanSensitivity;
-            transform.position -= new Vector3(delta.x * scale, 0f, delta.y * scale);
+            // Scale pan to zoom distance so dragging covers the same apparent distance
+            // at any zoom level.
+            float scale  = _zoomDistance * _mousePanSensitivity;
+            Vector3 forward = FlatForward();
+            Vector3 right   = Vector3.Cross(Vector3.up, forward).normalized;
+
+            _pivot -= right   * (delta.x * scale);
+            _pivot -= forward * (delta.y * scale);
         }
 
         // =====================================================================
-        // Input — Scroll Wheel Zoom
+        // Input — Scroll Wheel Zoom (perspective dolly)
         // =====================================================================
 
         private void HandleScrollZoom()
@@ -179,10 +221,67 @@ namespace Mystpath
             float scroll = Input.GetAxis("Mouse ScrollWheel");
             if (Mathf.Approximately(scroll, 0f)) return;
 
-            // Proportional zoom: delta is a fraction of the current size, so zooming
-            // feels equally responsive whether zoomed in or out.
-            float newSize = _camera.orthographicSize * (1f - scroll * _zoomSpeed);
-            _camera.orthographicSize = Mathf.Clamp(newSize, _minOrthographicSize, _maxOrthographicSize);
+            // Proportional dolly: zoom speed is a fraction of the current distance.
+            _zoomDistance = Mathf.Clamp(
+                _zoomDistance * (1f - scroll * _zoomSpeed),
+                _minZoomDistance,
+                _maxZoomDistance);
+        }
+
+        // =====================================================================
+        // Pivot Bounds Clamping
+        // =====================================================================
+
+        private void ClampPivotToBounds()
+        {
+            if (_worldGenerator?.Grid == null) return;
+
+            int gridWidth  = _worldGenerator.Grid.Width;
+            int gridHeight = _worldGenerator.Grid.Height;
+
+            // Compute grid world extents (approximate; flat-top hex geometry).
+            float maxX = gridWidth  * _hexWorldSize * Sqrt3 * 0.5f;
+            float maxZ = gridHeight * _hexWorldSize * 0.75f;
+
+            // Allow the pivot to stray a little outside so the edge of the map
+            // can be centred for large zooms, but never by more than half a screen.
+            float margin = _zoomDistance * 0.5f;
+            _pivot.x = Mathf.Clamp(_pivot.x, -margin, maxX + margin);
+            _pivot.z = Mathf.Clamp(_pivot.z, -margin, maxZ + margin);
+            _pivot.y = 0f; // keep pivot on the horizontal ground plane
+        }
+
+        // =====================================================================
+        // Camera Transform
+        // =====================================================================
+
+        /// <summary>
+        /// Positions the camera behind the pivot at the current pitch, yaw, and
+        /// zoom distance. Called every frame after input is processed.
+        /// </summary>
+        private void ApplyCameraTransform()
+        {
+            Quaternion rotation = Quaternion.Euler(_pitchAngle, _yawAngle, 0f);
+
+            // Offset backwards along the rotated -Z axis at the current zoom distance.
+            Vector3 backward = rotation * Vector3.back;
+            transform.position = _pivot + backward * _zoomDistance;
+            transform.rotation = rotation;
+        }
+
+        // =====================================================================
+        // Helpers
+        // =====================================================================
+
+        /// <summary>
+        /// Returns the camera's forward vector projected onto the XZ plane and normalised.
+        /// Used to make keyboard/drag pan feel aligned with the view direction.
+        /// </summary>
+        private Vector3 FlatForward()
+        {
+            Vector3 fwd = Quaternion.Euler(0f, _yawAngle, 0f) * Vector3.forward;
+            fwd.y = 0f;
+            return fwd.normalized;
         }
     }
 }
