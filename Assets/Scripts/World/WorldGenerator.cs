@@ -66,6 +66,7 @@ namespace Mystpath
         /// Generates a new world using the currently configured seed and dimensions.
         /// Clears and repopulates the HexGrid. Safe to call multiple times.
         /// </summary>
+        [ContextMenu("Generate World (Current Seed)")]
         public void GenerateWorld()
         {
             _terrainFeatures.Clear();
@@ -110,6 +111,7 @@ namespace Mystpath
         }
 
         /// <summary>Generates a world with a freshly randomized seed.</summary>
+        [ContextMenu("Generate World (New Seed)")]
         public void GenerateWithNewSeed()
         {
             _seed = Random.Range(0, int.MaxValue);
