@@ -57,6 +57,16 @@ namespace Mystpath
         /// <summary>The terrain feature this cell belongs to, or null if none.</summary>
         public TerrainFeature OwningFeature;
 
+        /// <summary>
+        /// Stable string ID of the owning terrain feature. Populated alongside OwningFeature
+        /// so feature membership survives serialization without a live object reference.
+        /// Empty string means no feature.
+        /// </summary>
+        public string OwningFeatureId = string.Empty;
+
+        /// <summary>Returns true if this cell is a member of any terrain feature.</summary>
+        public bool HasFeature => !string.IsNullOrEmpty(OwningFeatureId);
+
         // --- Occupancy ---
 
         /// <summary>The building instance occupying this cell, or null if unoccupied.</summary>

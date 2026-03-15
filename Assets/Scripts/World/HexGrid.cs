@@ -56,6 +56,14 @@ namespace Mystpath
             return cell;
         }
 
+        /// <summary>
+        /// Attempts to retrieve the HexCell at the given coordinates.
+        /// Returns true and sets <paramref name="cell"/> if found; returns false otherwise.
+        /// Prefer this over GetCell when null-checking is performance-sensitive.
+        /// </summary>
+        public bool TryGetCell(HexCoord coord, out HexCell cell) =>
+            _cells.TryGetValue(coord, out cell);
+
         /// <summary>Returns true if a cell exists at the given coordinates.</summary>
         public bool HasCell(HexCoord coord) => _cells.ContainsKey(coord);
 
