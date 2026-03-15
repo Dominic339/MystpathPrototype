@@ -104,6 +104,35 @@ namespace Mystpath
         [SerializeField] private Material _terrainMaterial;
 
         // =====================================================================
+        // Public Events & State
+        // =====================================================================
+
+        /// <summary>
+        /// Fired synchronously at the end of every successful <see cref="BuildTerrain"/> call,
+        /// after the mesh and MeshCollider are fully constructed.
+        ///
+        /// <see cref="WorldPropSpawner"/> subscribes here so it can spawn props on top of
+        /// the finished terrain surface. Any system that needs to run AFTER the terrain mesh
+        /// exists should subscribe to this event rather than to
+        /// <see cref="WorldGenerator.OnWorldGenerated"/>.
+        /// </summary>
+        public event System.Action OnTerrainBuilt;
+
+        /// <summary>
+        /// True after the first successful <see cref="BuildTerrain"/> call.
+        /// Systems that subscribe to <see cref="OnTerrainBuilt"/> in their Start() can check
+        /// this flag to catch the case where the terrain was already built before they ran.
+        /// </summary>
+        public bool IsBuilt { get; private set; }
+
+        /// <summary>
+        /// The elevation scale currently applied to BaseElevation values.
+        /// Exposed so other systems (e.g., WorldPropSpawner) can compute world-space
+        /// Y positions from HexCell.BaseElevation without duplicating the constant.
+        /// </summary>
+        public float ElevationScale => _elevationScale;
+
+        // =====================================================================
         // Private State
         // =====================================================================
 
@@ -197,7 +226,14 @@ namespace Mystpath
             EnsureMaterial();
             BuildCombinedMesh();
 
+            IsBuilt = true;
+
             Debug.Log("[WorldTerrainBuilder] Terrain mesh built successfully.");
+
+            // Notify subscribers (WorldPropSpawner, etc.) that the terrain surface
+            // and its MeshCollider are ready. Fired after IsBuilt is set to true so
+            // systems that check IsBuilt in Start() see the correct state.
+            OnTerrainBuilt?.Invoke();
         }
 
         // =====================================================================
@@ -323,8 +359,14 @@ namespace Mystpath
 
             var go = new GameObject("TerrainChunk_0");
             go.transform.SetParent(_terrainRoot.transform, worldPositionStays: false);
-            go.AddComponent<MeshFilter>().sharedMesh      = mesh;
+            go.AddComponent<MeshFilter>().sharedMesh       = mesh;
             go.AddComponent<MeshRenderer>().sharedMaterial = _terrainMaterial;
+
+            // MeshCollider enables Physics.Raycast hits on the terrain surface.
+            // Used by WorldPropSpawner (future: for precise per-position Y sampling),
+            // and by future click-to-select, click-to-build, and NPC pathfinding systems.
+            // Non-convex, non-trigger — correct for walkable/clickable terrain.
+            go.AddComponent<MeshCollider>().sharedMesh = mesh;
         }
 
         /// <summary>
