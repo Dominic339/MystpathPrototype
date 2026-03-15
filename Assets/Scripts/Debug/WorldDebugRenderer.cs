@@ -23,8 +23,13 @@ namespace Mystpath
     public class WorldDebugRenderer : MonoBehaviour
     {
         [Header("References")]
-        [Tooltip("The WorldGenerator whose output should be visualized.")]
+        [Tooltip("The WorldGenerator whose output should be visualized. " +
+                 "Auto-found at runtime if left unassigned.")]
         [SerializeField] private WorldGenerator _worldGenerator;
+
+        [Tooltip("Camera used for mouse-to-hex hover detection. " +
+                 "Auto-found at runtime if left unassigned (looks for Main Camera first).")]
+        [SerializeField] private Camera _debugCamera;
 
         [Header("Display Settings")]
         [SerializeField] private DebugOverlayType _currentOverlay = DebugOverlayType.None;
@@ -43,6 +48,7 @@ namespace Mystpath
         private static readonly float Sqrt3 = Mathf.Sqrt(3f);
 
         // Convenience accessor — reads the grid from the generator so both always stay in sync.
+        // Returns null safely if the generator or its grid is not yet initialised.
         private HexGrid ActiveGrid => _worldGenerator != null ? _worldGenerator.Grid : null;
 
         // =====================================================================
@@ -51,6 +57,21 @@ namespace Mystpath
 
         private void Awake()
         {
+            // Auto-resolve WorldGenerator if not assigned in the inspector.
+            if (_worldGenerator == null)
+                _worldGenerator = FindFirstObjectByType<WorldGenerator>();
+
+            if (_worldGenerator == null)
+                Debug.LogWarning("[WorldDebugRenderer] WorldGenerator not found. " +
+                                 "Overlays will not render until one is present in the scene.");
+
+            // Auto-resolve debug camera. Prefer the tagged Main Camera; fall back to any camera.
+            if (_debugCamera == null)
+                _debugCamera = Camera.main ?? FindFirstObjectByType<Camera>();
+
+            if (_debugCamera == null)
+                Debug.LogWarning("[WorldDebugRenderer] No camera found for hover detection.");
+
             RebuildHexMesh();
         }
 
@@ -115,10 +136,10 @@ namespace Mystpath
         {
             _hoveredCell = null;
 
-            if (ActiveGrid == null || Camera.main == null) return;
+            if (ActiveGrid == null || _debugCamera == null) return;
             if (_currentOverlay == DebugOverlayType.None) return;
 
-            Ray ray = Camera.main.ScreenPointToRay(Input.mousePosition);
+            Ray ray = _debugCamera.ScreenPointToRay(Input.mousePosition);
             var ground = new Plane(Vector3.up, Vector3.zero);
             if (!ground.Raycast(ray, out float enter)) return;
 
