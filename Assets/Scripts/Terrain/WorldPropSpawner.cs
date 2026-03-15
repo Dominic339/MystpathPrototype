@@ -105,6 +105,27 @@ namespace Mystpath
         // InvalidOperationException during the foreach.
         private readonly List<HexCell> _cellsSnapshot = new List<HexCell>();
 
+        /// <summary>
+        /// The only BiomeTypes that may be registered as primary biome prop sets.
+        /// Support/future/variant sets (Forest_Dense, Foothills, Debris_Common, etc.)
+        /// that target a biome not in this list are automatically skipped during
+        /// <see cref="BuildSetLookup"/>, preventing them from polluting the biome
+        /// dictionary and creating confusing duplicate-overwrite warnings.
+        ///
+        /// Shore is intentionally absent — shore sets use <see cref="BiomePropSet.IsShoreSpecificSet"/>
+        /// and are placed into <see cref="_shoreSets"/> instead.
+        /// </summary>
+        private static readonly System.Collections.Generic.HashSet<BiomeType> PrimaryBiomeTypes =
+            new System.Collections.Generic.HashSet<BiomeType>
+            {
+                BiomeType.Grassland,
+                BiomeType.Forest,
+                BiomeType.Desert,
+                BiomeType.Mountain,
+                BiomeType.Tundra,
+                BiomeType.Swamp,
+            };
+
         // =====================================================================
         // Unity Lifecycle
         // =====================================================================
@@ -371,39 +392,78 @@ namespace Mystpath
             _setByBiome.Clear();
             _shoreSets.Clear();
 
-            int skipped = 0;
+            int skippedExcluded  = 0; // ExcludeFromNaturalSpawning = true
+            int skippedNonPrimary = 0; // TargetBiome not in PrimaryBiomeTypes
+            int skippedDuplicate = 0; // primary biome slot already filled
 
             foreach (BiomePropSet set in _biomePropSets)
             {
                 if (set == null) continue;
 
-                // Skip sets explicitly excluded from natural world spawning
-                // (e.g., Crops_Future, managed farm yields).
+                // --- Explicit opt-out (Crops_Future, managed sets, etc.) ---
                 if (set.ExcludeFromNaturalSpawning)
                 {
-                    skipped++;
+                    skippedExcluded++;
                     continue;
                 }
 
+                // --- Shore-specific sets (apply on top of all biomes) ---
                 if (set.IsShoreSpecificSet)
                 {
                     _shoreSets.Add(set);
-                }
-                else
-                {
-                    if (_setByBiome.ContainsKey(set.TargetBiome))
-                        Debug.LogWarning($"[WorldPropSpawner] Duplicate BiomePropSet for biome " +
-                                         $"{set.TargetBiome} — \"{set.name}\" overwrites previous. " +
-                                         "Consider removing or merging duplicates.");
-                    _setByBiome[set.TargetBiome] = set;
+                    WarnIfSetEffectivelyEmpty(set);
+                    continue;
                 }
 
-                // Warn if the set has entries but none will ever spawn.
+                // --- Primary biome filter ---
+                // Only Grassland, Forest, Desert, Mountain, Tundra, and Swamp are
+                // valid primary biome types. Support/variant sets (Forest_Dense,
+                // Foothills, Debris_Common, Harvestable_Trees, etc.) will be
+                // excluded here if their TargetBiome is None or a non-primary type.
+                // Run Tools/Mystpath/Validate and Fix Biome Prop Sets to auto-mark
+                // known support sets with ExcludeFromNaturalSpawning = true.
+                if (!PrimaryBiomeTypes.Contains(set.TargetBiome))
+                {
+                    skippedNonPrimary++;
+                    Debug.Log($"[WorldPropSpawner] Skipping \"{set.name}\": " +
+                              $"TargetBiome={set.TargetBiome} is not a primary biome type. " +
+                              "If this set should spawn props, set its TargetBiome to one of: " +
+                              "Grassland, Forest, Desert, Mountain, Tundra, Swamp. " +
+                              "If it is a support/future set, mark ExcludeFromNaturalSpawning=true " +
+                              "via Tools/Mystpath/Validate and Fix Biome Prop Sets.");
+                    continue;
+                }
+
+                // --- Duplicate guard (first-wins, no overwrite) ---
+                // If two sets target the same primary biome (e.g., Forest and Forest_Dense
+                // both set to BiomeType.Forest), the FIRST one registered wins.
+                // This prevents support variants from silently overwriting the intended set.
+                if (_setByBiome.ContainsKey(set.TargetBiome))
+                {
+                    skippedDuplicate++;
+                    Debug.LogWarning($"[WorldPropSpawner] Duplicate BiomePropSet for biome " +
+                                     $"{set.TargetBiome}: \"{set.name}\" skipped — " +
+                                     $"\"{_setByBiome[set.TargetBiome].name}\" is already registered. " +
+                                     "Mark the support/variant set with ExcludeFromNaturalSpawning=true " +
+                                     "via Tools/Mystpath/Validate and Fix Biome Prop Sets.");
+                    continue;
+                }
+
+                _setByBiome[set.TargetBiome] = set;
                 WarnIfSetEffectivelyEmpty(set);
             }
 
-            if (skipped > 0)
-                Debug.Log($"[WorldPropSpawner] Skipped {skipped} set(s) marked ExcludeFromNaturalSpawning.");
+            // Summary log so the designer can see exactly what was loaded.
+            var registeredNames = new System.Text.StringBuilder();
+            foreach (var kv in _setByBiome)
+                registeredNames.Append($" {kv.Key}={kv.Value.name}");
+
+            Debug.Log($"[WorldPropSpawner] BuildSetLookup: " +
+                      $"{_setByBiome.Count} primary sets [{registeredNames}], " +
+                      $"{_shoreSets.Count} shore set(s), " +
+                      $"{skippedExcluded} excluded, " +
+                      $"{skippedNonPrimary} non-primary, " +
+                      $"{skippedDuplicate} duplicate(s) skipped.");
 
             if (_setByBiome.Count == 0 && _shoreSets.Count == 0)
                 Debug.LogWarning("[WorldPropSpawner] No usable BiomePropSets registered. " +
@@ -412,12 +472,26 @@ namespace Mystpath
         }
 
         /// <summary>
-        /// Logs a warning if every entry in <paramref name="set"/> has SpawnChance == 0
-        /// or there are no entries with a valid (non-null) prefab, so the designer
-        /// can catch misconfigured assets before entering Play Mode.
+        /// Logs warnings for any condition that would cause this set to produce zero props
+        /// at runtime: no entries, all-null prefabs, all-zero weights, all-zero chances,
+        /// or a zero <see cref="BiomePropSet.GlobalDensityMultiplier"/>.
+        ///
+        /// Called at startup (inside BuildSetLookup) so designers see actionable console
+        /// messages immediately on Play rather than discovering a blank world.
+        /// Run Tools → Mystpath → Validate and Fix Biome Prop Sets to auto-correct these.
         /// </summary>
         private static void WarnIfSetEffectivelyEmpty(BiomePropSet set)
         {
+            // A zero GlobalDensityMultiplier collapses effectiveChance to 0 for every
+            // entry regardless of their own SpawnChance values — nothing will ever spawn.
+            if (set.GlobalDensityMultiplier <= 0f)
+            {
+                Debug.LogWarning($"[WorldPropSpawner] BiomePropSet \"{set.name}\": " +
+                                 "GlobalDensityMultiplier = 0 — nothing will spawn. " +
+                                 "Run Tools/Mystpath/Validate and Fix Biome Prop Sets.");
+                // Don't return — check entries too for a complete picture.
+            }
+
             if (set.Entries == null || set.Entries.Count == 0)
             {
                 Debug.LogWarning($"[WorldPropSpawner] BiomePropSet \"{set.name}\" has no entries. " +
@@ -426,21 +500,21 @@ namespace Mystpath
                 return;
             }
 
-            bool hasValidPrefab  = false;
+            bool hasValidPrefab   = false;
             bool hasNonZeroChance = false;
             bool hasNonZeroWeight = false;
 
             foreach (BiomePropEntry e in set.Entries)
             {
                 if (e == null) continue;
-                if (e.Prefab != null)            hasValidPrefab  = true;
-                if (e.SpawnChance > 0f)          hasNonZeroChance = true;
-                if (e.SpawnWeight > 0f)          hasNonZeroWeight = true;
+                if (e.Prefab != null)   hasValidPrefab   = true;
+                if (e.SpawnChance > 0f) hasNonZeroChance = true;
+                if (e.SpawnWeight > 0f) hasNonZeroWeight = true;
             }
 
             if (!hasValidPrefab)
                 Debug.LogWarning($"[WorldPropSpawner] BiomePropSet \"{set.name}\": " +
-                                 "all entries have null prefabs — nothing will spawn. " +
+                                 "all entries have null Prefab references — nothing will spawn. " +
                                  "Assign prefabs from Assets/Prefabs/Nature/.");
             else if (!hasNonZeroWeight)
                 Debug.LogWarning($"[WorldPropSpawner] BiomePropSet \"{set.name}\": " +
