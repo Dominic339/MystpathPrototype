@@ -111,7 +111,7 @@ namespace Mystpath
         /// </summary>
         [Tooltip("Multiplier on per-entry SpawnChance. " +
                  "1.0 = use entry values as-is. 0 = nothing spawns.")]
-        [Range(0f, 2f)]
+        [Range(0f, 20f)]
         public float GlobalDensityMultiplier = 1f;
 
         // =====================================================================
