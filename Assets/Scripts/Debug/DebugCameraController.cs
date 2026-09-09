@@ -13,26 +13,24 @@ namespace Mystpath
     /// Controls:
     ///   WASD / Arrow keys  — pan across the world (moves the camera pivot)
     ///   Q / E              — rotate the camera left / right around the current pivot
-    ///   Page Up / Page Down — raise / lower the camera pivot vertically (clamped range)
     ///   Middle mouse drag  — pan (click-drag on the world surface)
     ///   Right mouse drag   — pan (click-drag on the world surface)
     ///   Scroll wheel       — zoom in/out by moving the camera along its view axis
+    ///   Right mouse + Scroll — tilt the camera pitch (up = more overhead, down = flatter)
     ///
     /// Zoom model:
     ///   The camera moves closer to / further from the terrain along its angled
-    ///   view direction — a perspective dolly. The pitch angle is fixed; only
-    ///   distance changes. This preserves the angled framing at all zoom levels.
+    ///   view direction — a perspective dolly. The pitch angle is fixed by default;
+    ///   hold right mouse and scroll to tilt the angle without affecting zoom distance.
     ///
-    /// Vertical offset model:
-    ///   Page Up / Page Down raise and lower the camera pivot on the Y axis within
-    ///   a clamped range (_minPivotY to _maxPivotY). This lets the player tilt the
-    ///   effective viewing angle slightly to improve readability of elevated terrain
-    ///   (mountains, plateaus) or to bring the horizon line closer. It is intentionally
-    ///   limited — this is not a free-fly debug camera.
+    /// Pitch model:
+    ///   Right mouse button held + scroll wheel adjusts _pitchAngle within [_minPitch, _maxPitch].
+    ///   This lets the player tilt between an overhead read and a low horizon framing,
+    ///   without the camera flying to a different height. Pure scroll (no right mouse) zooms.
     ///
     /// Bounds:
     ///   Camera pivot is soft-clamped to the grid bounds so the view stays
-    ///   near the playfield. Vertical pivot is hard-clamped to _minPivotY / _maxPivotY.
+    ///   near the playfield.
     ///
     /// On Start, the camera automatically centres above the grid at a comfortable
     /// management distance. Call CenterOnWorld() at any time to return to that view.
@@ -84,18 +82,16 @@ namespace Mystpath
         [Tooltip("Minimum camera distance from terrain surface (dolly near limit).")]
         [SerializeField] private float _minZoomDistance = 8f;
         [Tooltip("Maximum camera distance from terrain surface (dolly far limit).")]
-        [SerializeField] private float _maxZoomDistance = 140f;
+        [SerializeField] private float _maxZoomDistance = 70f;
 
-        [Header("Vertical Offset (Page Up / Page Down)")]
-        [Tooltip("Speed at which the pivot raises or lowers when Page Up / Page Down is held. " +
-                 "World units per second.")]
-        [SerializeField] private float _verticalPanSpeed = 18f;
-        [Tooltip("Lowest the pivot can be moved on the Y axis. " +
-                 "Negative values let the player look slightly below flat terrain.")]
-        [SerializeField] private float _minPivotY = -4f;
-        [Tooltip("Highest the pivot can be raised on the Y axis. " +
-                 "Allows shifting the view up to track mountains or elevated terrain.")]
-        [SerializeField] private float _maxPivotY = 20f;
+        [Header("Pitch Tilt (Right Mouse + Scroll)")]
+        [Tooltip("How fast the pitch angle changes when right mouse is held and scroll is used. " +
+                 "Degrees per scroll axis unit (scaled by Time.deltaTime).")]
+        [SerializeField] private float _pitchScrollSpeed = 250f;
+        [Tooltip("Minimum camera pitch angle (flattest / most horizon-facing).")]
+        [SerializeField, Range(15f, 60f)] private float _minPitch = 25f;
+        [Tooltip("Maximum camera pitch angle (most overhead).")]
+        [SerializeField, Range(45f, 89f)] private float _maxPitch = 80f;
 
         // =====================================================================
         // Private State
@@ -112,10 +108,6 @@ namespace Mystpath
 
         // Current dolly distance from the pivot to the camera position.
         private float _zoomDistance;
-
-        // Current vertical offset of the pivot above the terrain ground plane.
-        // Adjusted by Page Up / Page Down and hard-clamped to [_minPivotY, _maxPivotY].
-        private float _pivotY = 0f;
 
         private static readonly float Sqrt3 = Mathf.Sqrt(3f);
 
@@ -150,9 +142,8 @@ namespace Mystpath
         {
             HandleKeyPan();
             HandleKeyRotation();
-            HandleVerticalOffset();
             HandleMouseDragPan();
-            HandleScrollZoom();
+            HandleScrollZoomOrPitch();
             ClampPivotToBounds();
             ApplyCameraTransform();
         }
@@ -165,8 +156,7 @@ namespace Mystpath
         /// Repositions the camera pivot above the grid centre at a comfortable management
         /// distance for the current grid size. Safe to call at any time.
         ///
-        /// Default zoom is intentionally close (~22 % of world diameter) so the game
-        /// opens in a useful kingdom-builder framing rather than a far-out overview.
+        /// Default zoom opens close enough to see individual hexes and props clearly.
         /// The player can zoom out freely with the scroll wheel to see the full map.
         /// </summary>
         public void CenterOnWorld()
@@ -178,16 +168,12 @@ namespace Mystpath
             Vector3 worldCenter = new HexCoord(gridWidth / 2, gridHeight / 2)
                                       .ToWorldPosition(_hexWorldSize);
 
-            // Pivot sits at terrain level at the grid centre; vertical offset reset.
-            _pivotY = 0f;
-            _pivot  = new Vector3(worldCenter.x, _pivotY, worldCenter.z);
+            _pivot = new Vector3(worldCenter.x, 0f, worldCenter.z);
 
-            // Open at a close management distance (~22 % of world diameter) so the
-            // player sees useful detail immediately. 0.60 (the old default) was so
-            // far out that individual hexes and props were unreadable at startup.
-            // Full world diameter ≈ gridWidth * hexSize * sqrt(3).
+            // Open at a close management distance (~12 % of world diameter) so individual
+            // hexes and props are readable immediately. Full world diameter ≈ gridWidth * hexSize * sqrt(3).
             float worldDiameter = gridWidth * _hexWorldSize * Sqrt3;
-            _zoomDistance = Mathf.Clamp(worldDiameter * 0.22f,
+            _zoomDistance = Mathf.Clamp(worldDiameter * 0.12f,
                                         _minZoomDistance,
                                         _maxZoomDistance);
 
@@ -219,41 +205,12 @@ namespace Mystpath
 
         private void HandleKeyRotation()
         {
-            // Q rotates the camera counter-clockwise around the pivot; E clockwise.
-            // Rotation is applied to _yawAngle and reflected immediately in FlatForward()
-            // so keyboard pan direction tracks the new orientation without any extra logic.
             float rotDir = 0f;
             if (Input.GetKey(KeyCode.Q)) rotDir -= 1f;
             if (Input.GetKey(KeyCode.E)) rotDir += 1f;
             if (Mathf.Approximately(rotDir, 0f)) return;
 
             _yawAngle += rotDir * _rotationSpeed * Time.deltaTime;
-        }
-
-        // =====================================================================
-        // Input — Page Up / Page Down Vertical Offset
-        // =====================================================================
-
-        /// <summary>
-        /// Raises or lowers the camera pivot on the Y axis when Page Up / Page Down
-        /// is held. The offset is hard-clamped to [_minPivotY, _maxPivotY] so the
-        /// player cannot fly the camera to an arbitrary height.
-        ///
-        /// This is a comfort feature — shifting the pivot up lets the player look
-        /// across elevated terrain (mountains, hills) without zooming out. Shifting
-        /// it down brings the horizon closer for a flatter, more overhead-focused angle.
-        /// </summary>
-        private void HandleVerticalOffset()
-        {
-            float dir = 0f;
-            if (Input.GetKey(KeyCode.PageUp))   dir += 1f;
-            if (Input.GetKey(KeyCode.PageDown)) dir -= 1f;
-            if (Mathf.Approximately(dir, 0f)) return;
-
-            _pivotY = Mathf.Clamp(
-                _pivotY + dir * _verticalPanSpeed * Time.deltaTime,
-                _minPivotY,
-                _maxPivotY);
         }
 
         // =====================================================================
@@ -293,19 +250,33 @@ namespace Mystpath
         }
 
         // =====================================================================
-        // Input — Scroll Wheel Zoom (perspective dolly)
+        // Input — Scroll Wheel: Zoom or Pitch Tilt
         // =====================================================================
 
-        private void HandleScrollZoom()
+        /// <summary>
+        /// Scroll alone zooms by dollying the camera closer/further from the pivot.
+        /// Holding right mouse while scrolling adjusts the pitch angle instead,
+        /// letting the player tilt between overhead and a low horizon view.
+        /// </summary>
+        private void HandleScrollZoomOrPitch()
         {
             float scroll = Input.GetAxis("Mouse ScrollWheel");
             if (Mathf.Approximately(scroll, 0f)) return;
 
-            // Proportional dolly: zoom speed is a fraction of the current distance.
-            _zoomDistance = Mathf.Clamp(
-                _zoomDistance * (1f - scroll * _zoomSpeed),
-                _minZoomDistance,
-                _maxZoomDistance);
+            if (Input.GetMouseButton(1)) // right mouse held — tilt pitch
+            {
+                _pitchAngle = Mathf.Clamp(
+                    _pitchAngle + scroll * _pitchScrollSpeed * Time.deltaTime,
+                    _minPitch,
+                    _maxPitch);
+            }
+            else // plain scroll — zoom dolly
+            {
+                _zoomDistance = Mathf.Clamp(
+                    _zoomDistance * (1f - scroll * _zoomSpeed),
+                    _minZoomDistance,
+                    _maxZoomDistance);
+            }
         }
 
         // =====================================================================
@@ -328,10 +299,7 @@ namespace Mystpath
             float margin = _zoomDistance * 0.5f;
             _pivot.x = Mathf.Clamp(_pivot.x, -margin, maxX + margin);
             _pivot.z = Mathf.Clamp(_pivot.z, -margin, maxZ + margin);
-
-            // Apply vertical offset. _pivotY is already clamped in HandleVerticalOffset
-            // but we re-clamp here as a safety guard against external modifications.
-            _pivot.y = Mathf.Clamp(_pivotY, _minPivotY, _maxPivotY);
+            _pivot.y = 0f;
         }
 
         // =====================================================================

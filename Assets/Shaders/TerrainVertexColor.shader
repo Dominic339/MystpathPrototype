@@ -7,9 +7,10 @@
 //
 // Surface effect pipeline (applied in fragment, in order):
 //   1. Vertex color    — biome identity, shore sand blend, elevation tint (baked in mesh).
-//   2. Surface grain   — two-octave value noise on world XZ breaks up flat color patches.
-//                        Reads as grass blades / sand ripples / stone chips depending on
-//                        the underlying biome color. Scale and strength are tunable.
+//   2. Surface grain   — biome-chromatic two-octave value noise on world XZ. Green-dominant
+//                        vertices (grassland) use a fine scale for a bladed read; warm/red
+//                        vertices (desert) use a coarser scale for sand-ripple reads; neutral
+//                        vertices (mountain, tundra) use the base scale for rocky chips.
 //   3. Shore wetness   — UV0.y blends in a dark damp overlay on shoreline cells,
 //                        adding wetness on top of the sandy vertex color from BiomeBlendCalculator.
 //   4. Slope rock      — where surface normals are steep (NdotUp below threshold) the
@@ -37,21 +38,21 @@ Shader "Mystpath/TerrainVertexColor"
         // patches so the surface reads as grass, sand, or stone depending on color.
         [Header(Surface Grain)]
         _NoiseScale      ("Noise Scale (world units)",     Range(0.5, 16))  = 3.5
-        _NoiseStrength   ("Noise Strength",                Range(0, 0.5))   = 0.18
+        _NoiseStrength   ("Noise Strength",                Range(0, 0.5))   = 0.22
 
         // ── Shore Wetness ────────────────────────────────────────────────────────
         // UV0.y encodes IsShore (1 = shore, interpolated at corners). Shore cells
         // blend toward this darker overlay color to read as wet sand / mud.
         [Header(Shore Wetness)]
         _ShoreWetColor   ("Shore Wet Overlay",             Color)           = (0.40, 0.38, 0.28, 1)
-        _ShoreWetStrength("Shore Wet Strength",            Range(0, 1))     = 0.30
+        _ShoreWetStrength("Shore Wet Strength",            Range(0, 1))     = 0.40
 
         // ── Slope Rock ──────────────────────────────────────────────────────────
         // Where NdotUp (dot of surface normal with world up) is below _SlopeThreshold
         // the surface blends toward a rocky scree color. NdotUp = 1 = flat, 0 = wall.
         [Header(Slope Rock)]
         _SlopeRockColor  ("Slope Rock Colour",             Color)           = (0.46, 0.43, 0.40, 1)
-        _SlopeThreshold  ("Rock Slope Threshold (NdotUp)", Range(0, 1))     = 0.82
+        _SlopeThreshold  ("Rock Slope Threshold (NdotUp)", Range(0, 1))     = 0.78
         _SlopeBlend      ("Rock Slope Blend Width",        Range(0.01, 0.4)) = 0.20
 
         // ── Elevation Snow ───────────────────────────────────────────────────────
@@ -177,14 +178,22 @@ Shader "Mystpath/TerrainVertexColor"
                 // and 50 % shore-sand blend at IsShore cells (corner-blended).
                 half3 col = IN.vertexColor.rgb;
 
-                // ── 2. Surface grain (two-octave value noise) ───────────────────
-                // Samples world XZ with two frequencies for organic variation.
-                // Multiplier is centred at 1.0 so it darkens and lightens equally,
-                // reading as grass variation / sand ripples / stone chips depending
-                // on the underlying biome color without shifting hue.
-                float2 worldXZ = IN.positionWS.xz;
-                float  n1      = MysNoise(worldXZ * _NoiseScale);
-                float  n2      = MysNoise(worldXZ * _NoiseScale * 2.3 + float2(17.3, 43.1));
+                // ── 2. Surface grain (biome-chromatic two-octave value noise) ────
+                // The vertex color hue tells us what kind of surface this is:
+                //   Green-dominant  (G > R+0.1) → grassland: fine-scale variation
+                //   Warm/red-dominant (R > G+0.05) → desert/volcanic: coarser sand ripples
+                //   Otherwise (mountain, tundra, swamp, water) → medium rock/soil scale
+                // Scale is lerped between fine and coarse based on the chromatic balance,
+                // so the noise reads as blades of grass over meadows and dune ripples over sand.
+                float2 worldXZ  = IN.positionWS.xz;
+                float  greenness = saturate((col.g - col.r - 0.10) * 5.0); // 0=not green, 1=vivid green
+                float  warmness  = saturate((col.r - col.g - 0.05) * 5.0); // 0=neutral, 1=warm/sand
+                float  fineScale   = _NoiseScale * 2.0;   // grass: tight fine detail
+                float  coarseScale = _NoiseScale * 0.65;  // sand: broad slow ripples
+                float  baseScale   = lerp(_NoiseScale, fineScale,   greenness);
+                       baseScale   = lerp(baseScale,   coarseScale, warmness);
+                float  n1      = MysNoise(worldXZ * baseScale);
+                float  n2      = MysNoise(worldXZ * baseScale * 2.3 + float2(17.3, 43.1));
                 float  noise   = n1 * 0.65 + n2 * 0.35;
                 // Map [0,1] → multiplier centred at 1: [1 - s/2, 1 + s/2]
                 float  noiseMul = 1.0 - _NoiseStrength * 0.5 + noise * _NoiseStrength;

@@ -42,16 +42,16 @@ namespace Mystpath
         {
             switch (biome)
             {
-                case BiomeType.Grassland: return new Color(0.40f, 0.72f, 0.28f);
-                case BiomeType.Forest:    return new Color(0.12f, 0.40f, 0.16f);
-                case BiomeType.Desert:    return new Color(0.85f, 0.76f, 0.42f);
-                case BiomeType.Tundra:    return new Color(0.72f, 0.80f, 0.84f);
-                case BiomeType.Mountain:  return new Color(0.58f, 0.54f, 0.52f);
-                case BiomeType.Swamp:     return new Color(0.30f, 0.42f, 0.20f);
-                case BiomeType.Ocean:     return new Color(0.12f, 0.30f, 0.72f);
+                case BiomeType.Grassland: return new Color(0.33f, 0.66f, 0.18f);
+                case BiomeType.Forest:    return new Color(0.07f, 0.30f, 0.10f);
+                case BiomeType.Desert:    return new Color(0.86f, 0.70f, 0.32f);
+                case BiomeType.Tundra:    return new Color(0.60f, 0.73f, 0.82f);
+                case BiomeType.Mountain:  return new Color(0.52f, 0.50f, 0.46f);
+                case BiomeType.Swamp:     return new Color(0.24f, 0.37f, 0.14f);
+                case BiomeType.Ocean:     return new Color(0.08f, 0.22f, 0.65f);
                 case BiomeType.River:     return new Color(0.28f, 0.58f, 0.90f);
-                case BiomeType.Lake:      return new Color(0.20f, 0.46f, 0.82f);
-                case BiomeType.Volcanic:  return new Color(0.65f, 0.12f, 0.05f);
+                case BiomeType.Lake:      return new Color(0.18f, 0.42f, 0.80f);
+                case BiomeType.Volcanic:  return new Color(0.62f, 0.10f, 0.04f);
                 default:                  return Color.magenta; // visible authoring error
             }
         }
