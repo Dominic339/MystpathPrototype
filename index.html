@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Mystpath</title>
+    <style>
+      html, body { margin: 0; height: 100%; overflow: hidden; background: #0b0f17; }
+      #app { position: fixed; inset: 0; }
+      #hud {
+        position: fixed; top: 12px; left: 12px; padding: 8px 12px; border-radius: 8px;
+        background: rgba(10, 14, 22, 0.55); color: #e8ecf4; backdrop-filter: blur(6px);
+        font: 13px/1.4 system-ui, -apple-system, sans-serif; pointer-events: none; user-select: none;
+      }
+      #hud b { font-weight: 600; }
+      #hud .quiet { color: #a8b3c7; }
+    </style>
+  </head>
+  <body>
+    <div id="app"></div>
+    <div id="hud"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
