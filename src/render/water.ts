@@ -139,6 +139,11 @@ export class WaterSystem {
     return swell(x, z, this.time) * THREE.MathUtils.clamp(this.depthAt(x, z) / 2.5, 0, 1);
   }
 
+  /** Ripple height (simulated waves only) at one point. */
+  rippleAt(x: number, z: number): number {
+    return this.heightAt(x, z) - this.field.waterLevel - this.swellAt(x, z);
+  }
+
   /** Ripple height averaged over a disc — what a hull of that size actually feels. */
   rippleAverage(x: number, z: number, radius: number): number {
     let sum = 0;

@@ -69,7 +69,7 @@ function oak(seed: number): PlantGeo {
       const end = V(top.x + Math.cos(a) * reach, top.y + rise, top.z + Math.sin(a) * reach);
       const mid = V(top.x + Math.cos(a) * reach * 0.45, top.y + rise * 0.35, top.z + Math.sin(a) * reach * 0.45);
       parts.push(limbTube({ points: [top.clone().add(V(0, -0.3, 0)), mid, end], r0: r0 * 0.5, r1: 0.06, knots: b % 2 ? knots(1, seed + b) : [] }, OAK_BARK, 7, 9));
-      lobes.push({ center: end.clone().add(V(Math.cos(a) * 0.4, 0.7, Math.sin(a) * 0.4)), radius: rand(seed, 23 + st, 1.15, 1.6, b) });
+      lobes.push({ center: end.clone().add(V(Math.cos(a) * 0.4, 0.7, Math.sin(a) * 0.4)), radius: rand(seed, 23 + st, 1.3, 1.8, b) });
     }
     // A low side branch below the crown.
     if (!twin || st === 0) {
@@ -80,7 +80,7 @@ function oak(seed: number): PlantGeo {
       parts.push(limbTube({ points: [base, V(base.x + Math.cos(a) * 1.2, y + 0.4, base.z + Math.sin(a) * 1.2), end], r0: 0.13, r1: 0.04 }, OAK_BARK, 6, 8));
       lobes.push({ center: end.clone().add(V(0, 0.4, 0)), radius: 1.3 });
     }
-    lobes.push({ center: top.clone().add(V(0, 2.6, 0)), radius: twin ? 1.5 : 1.85 });
+    lobes.push({ center: top.clone().add(V(0, 2.7, 0)), radius: twin ? 1.7 : 2.1 });
   }
   return { wood: merge(parts), leaves: canopyMass(lobes, seed, { deep: LEAF_DEEP, base: LEAF, sun: LEAF_SUN }, 4) };
 }
@@ -258,9 +258,9 @@ function buildKind(kind: PropKind, v: number): BuiltKind {
   const seed = 101 + v * 37;
   switch (kind) {
     case 'oak': return { geo: oak(seed), sway: 0.0016, flat: false, shadow: true, density: 1 };
-    case 'birch': return { geo: birch(seed), sway: 0.002, flat: false, shadow: true, density: 0.95 };
-    case 'pine': return { geo: pine(seed), sway: 0.0009, flat: false, shadow: true, density: 1.5 };
-    case 'bush': return { geo: bush(seed), sway: 0.02, flat: false, shadow: true, density: 1.0 };
+    case 'birch': return { geo: birch(seed), sway: 0.002, flat: false, shadow: true, density: 0.92 };
+    case 'pine': return { geo: pine(seed), sway: 0.0009, flat: false, shadow: true, density: 1.12 };
+    case 'bush': return { geo: bush(seed), sway: 0.02, flat: false, shadow: true, density: 1.1 };
     case 'rock': return { geo: { wood: rock(seed, 0.8) }, sway: 0, flat: true, shadow: true, density: 1 };
     case 'boulder': return { geo: { wood: rock(seed + 5, 2.2) }, sway: 0, flat: true, shadow: true, density: 1 };
     case 'reeds': return { geo: { wood: reeds(seed) }, sway: 0.05, flat: false, shadow: false, density: 1 };

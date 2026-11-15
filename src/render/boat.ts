@@ -147,12 +147,18 @@ export function buildBoat(water: WaterSystem, route: [number, number][]): BoatVi
   let z = route[0][1];
   let heading = Math.atan2(route[1][1] - z, route[1][0] - x);
   const vel = new THREE.Vector2();
-  let strokeSide = 1;
   let wakeTimer = 0;
-  let lastStroke = 0;
+  let strokePhase = 0;
+  let strokeCount = 0;
+  let side = 1;
+  let targetSide = 1;
+  let splashTimer = 0;
   let smoothWant = heading;
   let turnRate = 0;
   let floatY = 0.16;
+  let floatVel = 0;
+  let pitchVel = 0;
+  let rollVel = 0;
 
   return {
     group,
@@ -188,39 +194,104 @@ export function buildBoat(water: WaterSystem, route: [number, number][]): BoatVi
         vel.multiplyScalar(1 - Math.min(1, dt * 3));
       }
 
-      // Float: ride the swell (sampled at bow, stern and sides) plus ripples averaged over
-      // the hull, so the boat responds to passing waves but not to its own wake.
+      // Float: ride the swell and the simulated waves. Waves are averaged over each quarter
+      // of the hull (bow, stern, port, starboard), so passing waves and splashes rock the
+      // boat, while its own wake (emitted well behind the stern) does not.
       const c = Math.cos(heading);
       const s = Math.sin(heading);
-      const bow = water.swellAt(x + c * 2.2, z + s * 2.2);
-      const stern = water.swellAt(x - c * 2.2, z - s * 2.2);
-      const port = water.swellAt(x - s * 0.5, z + c * 0.5);
-      const star = water.swellAt(x + s * 0.5, z - c * 0.5);
-      const ripple = THREE.MathUtils.clamp(water.rippleAverage(x, z, 2.6), -0.08, 0.08);
-      const targetY = 0 + (bow + stern + port + star) / 4 + ripple + 0.16;
-      floatY += (targetY - floatY) * Math.min(1, dt * 4);
+      const region = (ax: number, az: number) => {
+        let sum = 0;
+        for (let k = 0; k < 5; k++) {
+          const ox = Math.cos(k * 1.2566) * 0.45;
+          const oz = Math.sin(k * 1.2566) * 0.45;
+          sum += water.swellAt(ax + ox, az + oz) + water.rippleAt(ax + ox, az + oz);
+        }
+        return sum / 5;
+      };
+      const bow = region(x + c * 1.7, z + s * 1.7);
+      const stern = region(x - c * 1.5, z - s * 1.5);
+      const port = region(x - s * 0.6, z + c * 0.6);
+      const star = region(x + s * 0.6, z - c * 0.6);
+      const targetY = THREE.MathUtils.clamp((bow + stern + port + star) / 4, -0.25, 0.25) + 0.16;
+      // Buoyancy as a damped spring: lag and a little overshoot read as weight.
+      floatVel += ((targetY - floatY) * 28 - floatVel * 6) * dt;
+      floatY += floatVel * dt;
       group.position.set(x, floatY, z);
       group.rotation.set(0, -heading, 0);
-      const pitch = Math.atan2(bow - stern, 4.4);
-      const roll = Math.atan2(port - star, 1.0) * 0.6 + Math.sin(time * 1.3) * 0.012 - turnRate * 0.08;
-      canoe.rotation.z += (pitch - canoe.rotation.z) * Math.min(1, dt * 3);
-      canoe.rotation.x += (roll - canoe.rotation.x) * Math.min(1, dt * 3);
+      const pitch = THREE.MathUtils.clamp(Math.atan2(bow - stern, 3.2), -0.18, 0.18);
+      const roll = THREE.MathUtils.clamp(Math.atan2(port - star, 1.2) * 0.7, -0.2, 0.2) + Math.sin(time * 1.3) * 0.012 - turnRate * 0.08;
+      pitchVel += ((pitch - canoe.rotation.z) * 30 - pitchVel * 7) * dt;
+      rollVel += ((roll - canoe.rotation.x) * 34 - rollVel * 6) * dt;
+      canoe.rotation.z += pitchVel * dt;
+      canoe.rotation.x += rollVel * dt;
       paddler.root.rotation.z = canoe.rotation.x;
       paddler.root.rotation.x = -canoe.rotation.z;
 
-      // Paddle stroke, alternating sides; each stroke splashes into the wave simulation.
-      const cycle = (time * 0.75) % 1;
-      if (cycle < lastStroke) strokeSide = -strokeSide;
-      lastStroke = cycle;
-      const pull = Math.sin(cycle * Math.PI * 2);
-      const kneel = { tl: 1.4, tr: 1.4, kl: 1.45, kr: 1.45, sl: 0.9 + pull * 0.35, sr: 0.9 - pull * 0.35, el: 0.7, er: 0.7, spine: 0.25 + pull * 0.12 };
-      pose(paddler, kneel);
-      paddler.hips.position.y = 0.15;
-      paddler.spine.rotation.z = strokeSide * 0.25;
-      paddle.position.set(-0.05 + pull * 0.45, 0.25, strokeSide * 0.48);
-      paddle.rotation.set(strokeSide * 0.35, 0, 0.4 - pull * 0.6);
-      const bladeWorld = new THREE.Vector3(0, -0.72, 0).applyMatrix4(paddleMesh.matrixWorld);
-      if (pull > 0.85) water.disturb(bladeWorld.x, bladeWorld.z, -0.03, 0.5);
+      // Paddle stroke: a smooth pull (blade in the water, sweeping back) and a feathered
+      // recovery. The paddler switches sides every few strokes with an arc over the boat.
+      const ease = (t: number) => t * t * (3 - 2 * t);
+      strokePhase += dt * 0.7;
+      if (strokePhase >= 1) {
+        strokePhase -= 1;
+        strokeCount++;
+        if (strokeCount % 6 === 0) targetSide = -targetSide;
+      }
+      const PULL = 0.58;
+      let px: number;
+      let py: number;
+      let tilt: number;
+      let feather: number;
+      let inWater = false;
+      if (strokePhase < PULL) {
+        const t = ease(strokePhase / PULL);
+        px = 0.3 - 0.75 * t;
+        py = 0.3;
+        tilt = 0.45 - 0.8 * t;
+        feather = 0;
+        inWater = true;
+      } else {
+        const t = ease((strokePhase - PULL) / (1 - PULL));
+        px = -0.45 + 0.75 * t;
+        py = 0.3 + Math.sin(t * Math.PI) * 0.25;
+        tilt = -0.35 + 0.8 * t;
+        feather = Math.sin(t * Math.PI) * 1.3;
+        // Side switches happen during recovery, carrying the paddle up and over.
+        if (side !== targetSide) {
+          side = -targetSide * Math.cos(Math.PI * t);
+          py += Math.sin(t * Math.PI) * 0.45;
+          if (t > 0.98) side = targetSide;
+        }
+      }
+      const sideZ = side * 0.47;
+      paddle.position.set(px - 0.3, py, sideZ);
+      paddle.rotation.set(side * 0.32, feather, tilt);
+
+      // The body follows the paddle: reach forward at the catch, twist and lean into the pull.
+      const reach = THREE.MathUtils.clamp((px + 0.45) / 0.75, 0, 1);
+      pose(paddler, {
+        tl: 1.45,
+        tr: 1.45,
+        kl: 0.25,
+        kr: 0.25,
+        sl: 0.55 + reach * 0.75,
+        sr: 0.55 + reach * 0.75,
+        el: 0.85 - reach * 0.45,
+        er: 0.85 - reach * 0.45,
+        spine: 0.12 + reach * 0.2,
+      });
+      paddler.hips.position.y = 0.22;
+      paddler.spine.rotation.y = side * (reach - 0.4) * 0.45;
+      paddler.spine.rotation.z = side * 0.12;
+
+      // Ripples from the blade while it pulls through the water.
+      if (inWater && strokePhase > 0.05 && strokePhase < PULL - 0.05) {
+        splashTimer += dt;
+        if (splashTimer > 0.08) {
+          splashTimer = 0;
+          const bladeWorld = new THREE.Vector3(0, -0.72, 0).applyMatrix4(paddleMesh.matrixWorld);
+          water.disturb(bladeWorld.x, bladeWorld.z, -0.012, 0.45);
+        }
+      }
 
       // Bow wave and wake, scaled by speed relative to the water.
       wakeTimer += dt;
