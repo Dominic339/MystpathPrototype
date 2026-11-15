@@ -63,7 +63,22 @@ export const DISCOVERIES: readonly Discovery[] = [
   d('sheep-herding', 'Sheep and goat herding', 'stone', ['animal-husbandry'], ['hunt'], 'Herding sheep and goats for wool, milk and meat: pastures.', { needsSeen: ['wild-goat', 'mouflon'] }),
   d('pig-farming', 'Pig farming', 'stone', ['animal-husbandry'], ['hunt'], 'Keeping pigs bred from wild boar: pigsties.', { needsSeen: ['wild-boar'] }),
 
+  // Keeping food
+  d('smoking', 'Smoking', 'stone', [], ['cook-meat', 'cook-fish', 'dry-meat'], 'Hanging meat and fish in smoke so it keeps for weeks.'),
+  d('preserving', 'Honey preserves', 'stone', [], ['raid-wild-hive', 'dry-berries'], 'Sealing fruit in honey so it keeps through winter.', { needsSeen: ['honey'] }),
+  d('storage-pits', 'Storage pits', 'stone', [], ['dig-by-hand', 'roast-roots'], 'Reed-lined pits in cool earth that keep roots, nuts and grain far longer.', {
+    build: { inputs: { reeds: 6, 'stone-tools': 1 }, seconds: 400, job: 'digger', site: 'camp', want: 1 },
+  }),
+
   // ---- Iron era
+  d('salting', 'Salting', 'iron', [], ['cook-meat', 'dry-meat', 'carry-water'], 'Packing meat and fish in salt so it keeps for months.', { needsSeen: ['salt', 'rock-salt', 'salt-water'] }),
+  d('fermenting', 'Fermenting', 'iron', [], ['dry-fruit', 'forage', 'herding'], 'Letting milk, roots and fruit turn into cheese and pickles that keep.'),
+  d('root-cellar', 'Root cellars', 'iron', ['storage-pits'], ['grain-farming', 'dig-by-hand'], 'A cool, dark cellar for roots, fruit and cheese.', {
+    build: { inputs: { stone: 20, hardwood: 10 }, seconds: 900, job: 'digger', site: 'camp', want: 1 },
+  }),
+  d('ice-house', 'Ice houses', 'iron', ['ice-cutting'], ['ice-cutting', 'collect-ice'], 'Ice cut in winter and packed in straw keeps meat and milk cold through summer.', {
+    build: { inputs: { stone: 20, hardwood: 12, reeds: 20 }, seconds: 1200, job: 'mason', site: 'camp', want: 1 },
+  }),
   d('cattle-herding', 'Cattle herding', 'iron', ['animal-husbandry'], ['hunt', 'herding'], 'Taming aurochs into cattle for milk, meat, hides and pulling.', { needsSeen: ['aurochs'] }),
   d('beekeeping', 'Beekeeping', 'iron', ['bee-smoking'], ['smoke-wild-hive'], 'Keeping bees in boxes instead of raiding wild hives: apiaries.'),
   d('orchards', 'Orchards', 'iron', ['agriculture'], ['forage', 'grain-farming'], 'Planting fruit and nut trees.'),
@@ -76,6 +91,10 @@ export const DISCOVERIES: readonly Discovery[] = [
   // ---- Medieval and later
   d('sacred-groves', 'Sacred groves', 'medieval', [], ['forage', 'grove-tending'], 'Tending ancient groves for spirit wood.', { needsSeen: ['spirit-wood'] }),
   d('levitation', 'Levitation', 'medieval', ['mining'], ['mining', 'attune-mana'], 'Hover stone can be woken to lift weight against the ground.', { needsSeen: ['hover-stone'] }),
+  d('cold-binding', 'Cold binding', 'medieval', [], ['collect-ice', 'attune-mana'], 'Frost shards can be bound into cores that stay cold for months.', { needsSeen: ['frost-shard'] }),
+  d('frost-box', 'Frost box', 'medieval', ['cold-binding'], ['bind-frost'], 'A chest chilled by a bound frost shard: food keeps almost indefinitely.', {
+    build: { inputs: { 'cold-core': 2, hardwood: 6 }, seconds: 600, job: 'carpenter', site: 'camp', want: 1 },
+  }),
   d('grow-houses', 'Grow houses', 'renaissance', ['herb-gardening'], ['herb-growing'], 'Glass houses that grow herbs, spices and seedlings year-round.'),
   d('airship', 'Airship', 'renaissance', ['levitation'], ['cut-levitation-core', 'weave-canvas'], 'A canvas envelope carried aloft by levitation cores, steered by fins and a gondola.', {
     build: { inputs: { canvas: 20, 'hardwood-beams': 8, rope: 10, 'levitation-core': 4 }, seconds: 3600, job: 'carpenter', site: 'camp', want: 1 },
@@ -83,6 +102,13 @@ export const DISCOVERIES: readonly Discovery[] = [
   d('deep-mining', 'Deep mining', 'industrial', ['mining'], ['mining'], 'Deep shafts for rare ores.'),
   d('open-pit-mining', 'Open-pit mining', 'industrial', ['mining'], ['mining'], 'Stripping whole hillsides for bulk ore.'),
   d('steam-pumps', 'Steam pumps', 'industrial', ['wells'], ['well-drawing'], 'Pumping water in quantity.'),
+  d('canning', 'Canning', 'industrial', ['salting'], ['salt-meat', 'make-preserves'], 'Sealing cooked food in tin cans so it keeps for years.'),
+  d('refrigerator', 'Refrigeration', 'industrial', ['steam-pumps'], ['ice-cutting', 'pumping'], 'Mechanical cooling driven by an engine.', {
+    build: { inputs: { 'iron-ingot': 10, 'copper-ingot': 6 }, seconds: 1200, job: 'smith', site: 'camp', want: 1 },
+  }),
+  d('stasis-vault', 'Stasis vault', 'techno-magic', ['refrigerator', 'frost-box'], ['bind-frost', 'attune-mana'], 'Machinery and frost magic together stop time for what is stored.', {
+    build: { inputs: { 'iron-ingot': 20, 'mana-cell': 4, 'cold-core': 4 }, seconds: 2400, job: 'arcanist', site: 'camp', want: 1 },
+  }),
   d('oil-drilling', 'Oil drilling', 'industrial', ['deep-mining'], ['deep-mining', 'tar-digging'], 'Drilling for crude oil.'),
   d('gas-drilling', 'Gas drilling', 'industrial', ['oil-drilling'], ['oil-drilling'], 'Drilling for natural gas.'),
 ];

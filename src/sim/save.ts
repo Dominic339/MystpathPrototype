@@ -7,7 +7,7 @@ import type { World } from './world';
 import { buildTestScene } from './testScene';
 import { NavGrid } from './pathfinding';
 
-export const SAVE_VERSION = 4;
+export const SAVE_VERSION = 5;
 
 export interface SaveFile {
   version: number;
@@ -26,6 +26,7 @@ export interface SaveFile {
   seen: World['seen'];
   built: World['built'];
   projects: World['projects'];
+  spoilage: World['spoilage'];
   events: World['events'];
   wear: string;
   villagers: World['villagers'];
@@ -54,6 +55,7 @@ export function saveWorld(world: World): SaveFile {
     seen: world.seen,
     built: world.built,
     projects: world.projects,
+    spoilage: world.spoilage,
     events: world.events,
     wear: encodeFloats(world.nav.wear),
     villagers: world.villagers,
@@ -87,6 +89,7 @@ export function loadWorld(save: SaveFile): World {
     seen: [...save.seen],
     built: [...save.built],
     projects: clone(save.projects),
+    spoilage: clone(save.spoilage),
     events: clone(save.events),
     nav,
     villagers: clone(save.villagers),

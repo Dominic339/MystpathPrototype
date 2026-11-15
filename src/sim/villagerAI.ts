@@ -10,7 +10,9 @@ import { DISCOVERIES, DISCOVERY_BY_ID } from './data/discoveries';
 import { FAUNA_BY_ID } from './data/fauna';
 import { ENVIRONMENT_BY_ID } from './data/environments';
 import { JOBS, PASSION_JOBS, type JobId, type Passion } from './data/jobs';
-import { FOOD_VALUE, MATERIAL_BY_ID } from './data/materials';
+import { MATERIAL_BY_ID } from './data/materials';
+import { FOODS } from './data/preservation';
+import { foodTotal } from './food';
 import { itemName, RECIPES, type Recipe } from './data/processing';
 import { gainInsight, knows, logEvent, noteSeen } from './discovery';
 import { hexToWorld } from './hex';
@@ -78,7 +80,7 @@ export interface Villager {
 }
 
 const CAMP_FACILITIES = new Set(['campfire', 'knapping-spot', 'drying-rack', 'bone-carver']);
-const AVAILABLE_RECIPES = RECIPES.filter((r) => CAMP_FACILITIES.has(r.facility));
+const CAMP_RECIPES = RECIPES.filter((r) => CAMP_FACILITIES.has(r.facility));
 const WALK = 1.4;
 const STALK = 0.55;
 const CARRY_CAP = 8;
@@ -95,11 +97,9 @@ const DOING: Record<string, string> = {
   'carry-water': 'fetching water',
 };
 
-/** Food value of processed foods. */
-const COOKED_VALUE: Record<string, number> = {
-  'cooked-meat': 0.55, 'cooked-fish': 0.45, 'roasted-food': 0.3, flatbread: 0.35, 'dried-meat': 0.45,
-  'dried-fish': 0.4, 'dried-fruit': 0.3, 'egg-dishes': 0.3, 'dried-seaweed': 0.12,
-};
+/** Raw foods: anything edible that is a base material. */
+const RAW_FOODS = Object.keys(FOODS).filter((id) => MATERIAL_BY_ID.has(id));
+const isCooked = (id: string) => FOODS[id]?.class === 'cooked';
 
 /** By-hand methods this band can use: no facility, required discoveries made, and the tools for it. */
 function availableMethods(world: World): AcquisitionMethod[] {
@@ -139,12 +139,7 @@ function stock(world: World, id: string): number {
   return world.stockpile[id] ?? 0;
 }
 
-export function foodTotal(world: World): number {
-  let t = 0;
-  for (const [id, v] of Object.entries(FOOD_VALUE)) t += stock(world, id) * v;
-  for (const [id, v] of Object.entries(COOKED_VALUE)) t += stock(world, id) * v;
-  return t;
-}
+export { foodTotal };
 
 function need(have: number, want: number): number {
   return Math.max(0, Math.min(1, (want - have) / Math.max(1, want)));
@@ -156,7 +151,7 @@ function materialNeeds(world: World): Record<string, number> {
   const food = need(foodTotal(world), t.food);
   const wood = need(stock(world, 'hardwood') + stock(world, 'softwood'), t.wood);
   const n: Record<string, number> = {};
-  for (const id of Object.keys(FOOD_VALUE)) n[id] = food;
+  for (const id of RAW_FOODS) n[id] = food;
   n.hardwood = wood;
   n.softwood = wood;
   for (const id of ['stone', 'flint', 'reeds', 'clay', 'sand', 'fresh-water', 'resin', 'herbs']) n[id] = need(stock(world, id), t[id]);
@@ -182,14 +177,26 @@ function methodNeed(m: AcquisitionMethod, needs: Record<string, number>): number
 }
 
 function recipeNeed(world: World, r: Recipe): number {
+  if (r.requires && !r.requires.every((d) => knows(world, d))) return 0;
   for (const [id, q] of Object.entries(r.inputs)) if (stock(world, id) < q) return 0;
-  const t = targets(world.villagers.length);
+  const people = world.villagers.length;
+  const t = targets(people);
   let best = 0;
   for (const id of Object.keys(r.outputs)) {
-    if (COOKED_VALUE[id] !== undefined) {
-      const cooked = Object.keys(COOKED_VALUE).reduce((s, k) => s + stock(world, k), 0);
-      best = Math.max(best, need(cooked, world.villagers.length * 2) * 0.9);
-    } else if (t[id] !== undefined) best = Math.max(best, need(stock(world, id), t[id]));
+    const out = FOODS[id];
+    if (out) {
+      // Preserving: raw food that will spoil soon is worth turning into something that keeps.
+      for (const inId of Object.keys(r.inputs)) {
+        const inp = FOODS[inId];
+        if (inp && inp.shelfDays <= 6 && out.shelfDays > inp.shelfDays * 4) best = Math.max(best, 0.75 * Math.min(1, stock(world, inId) / (people * 2)));
+      }
+      // Cooking: worth it when cooked food is short.
+      if (isCooked(id)) {
+        const cooked = Object.keys(FOODS).filter(isCooked).reduce((s, k) => s + stock(world, k), 0);
+        best = Math.max(best, need(cooked, people * 2) * 0.9);
+      }
+    }
+    if (t[id] !== undefined) best = Math.max(best, need(stock(world, id), t[id]));
     else best = Math.max(best, 0.03);
   }
   return best;
@@ -222,7 +229,7 @@ export function rankJobs(world: World, v: Villager): Choice[] {
     if (base <= 0) continue;
     out.push({ job: m.job, score: weigh(m.job, base), method: m.id });
   }
-  for (const r of AVAILABLE_RECIPES) {
+  for (const r of CAMP_RECIPES) {
     const base = recipeNeed(world, r);
     if (base <= 0) continue;
     const job = recipeJob(r);
@@ -744,11 +751,12 @@ function collect(world: World, v: Villager, m: AcquisitionMethod, target: Target
 }
 
 function eat(world: World, v: Villager): void {
-  const order = [...Object.entries(COOKED_VALUE), ...Object.entries(FOOD_VALUE)].sort((a, b) => b[1] - a[1]);
-  for (const [id, value] of order) {
+  // Eat what will spoil first; keep the preserved food for lean times.
+  const order = Object.entries(FOODS).sort((a, b) => a[1].shelfDays - b[1].shelfDays || b[1].value - a[1].value);
+  for (const [id, info] of order) {
     while (stock(world, id) >= 1 && v.hunger > 0.1) {
       world.stockpile[id] -= 1;
-      v.hunger = Math.max(0, v.hunger - value);
+      v.hunger = Math.max(0, v.hunger - info.value);
     }
     if (v.hunger <= 0.1) break;
   }

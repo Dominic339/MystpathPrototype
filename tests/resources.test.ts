@@ -9,6 +9,7 @@ import { JOBS } from '../src/sim/data/jobs';
 import { DISCOVERIES, DISCOVERY_BY_ID } from '../src/sim/data/discoveries';
 import { FLORA, FLORA_BY_ID } from '../src/sim/data/flora';
 import { FAUNA, FAUNA_BY_ID } from '../src/sim/data/fauna';
+import { FOODS, STORAGES } from '../src/sim/data/preservation';
 
 const isItem = (id: string) => MATERIAL_BY_ID.has(id) || PRODUCTS[id] !== undefined;
 
@@ -104,7 +105,7 @@ describe('references', () => {
     const work = new Set([...ACQUISITION.map((a) => a.id), ...RECIPES.map((r) => r.id)]);
     for (const d of DISCOVERIES) {
       for (const w of d.inspiredBy) expect(work.has(w), `${d.id}: ${w}`).toBe(true);
-      for (const s of d.needsSeen ?? []) expect(MATERIAL_BY_ID.has(s) || FAUNA_BY_ID.has(s) || FLORA_BY_ID.has(s), `${d.id}: ${s}`).toBe(true);
+      for (const s of d.needsSeen ?? []) expect(isItem(s) || FAUNA_BY_ID.has(s) || FLORA_BY_ID.has(s), `${d.id}: ${s}`).toBe(true);
       for (const id of Object.keys(d.build?.inputs ?? {})) expect(isItem(id), `${d.id}: ${id}`).toBe(true);
     }
     for (const a of ACQUISITION) {
@@ -118,6 +119,18 @@ describe('references', () => {
       expect(pre, `${d.id}: ${r}`).toBeDefined();
       expect(eraIndex(pre!.era)).toBeLessThanOrEqual(eraIndex(d.era));
     }
+  });
+
+  it('food preservation is consistent', () => {
+    for (const id of Object.keys(FOODS)) expect(isItem(id), id).toBe(true);
+    // Every edible base material has spoilage data.
+    for (const m of MATERIALS) if (m.perishable && ['plant', 'animal'].includes(m.layer) && !['hides', 'animal-fat', 'herbs'].includes(m.id)) expect(FOODS[m.id], m.id).toBeDefined();
+    for (const r of RECIPES) for (const d of r.requires ?? []) expect(DISCOVERY_BY_ID.has(d), `${r.id}: ${d}`).toBe(true);
+    // Every storage is built from a discovery of the same id, with parallel cold paths.
+    for (const s of STORAGES) expect(DISCOVERY_BY_ID.get(s.id)?.build, s.id).toBeDefined();
+    for (const id of ['ice-house', 'frost-box', 'refrigerator']) expect(STORAGES.some((s) => s.id === id), id).toBe(true);
+    // Preserved foods keep far longer than raw.
+    expect(FOODS['dried-meat'].shelfDays).toBeGreaterThan(FOODS['game-meat'].shelfDays * 20);
   });
 
   it('includes the facilities the design names', () => {

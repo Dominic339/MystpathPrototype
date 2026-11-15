@@ -128,6 +128,23 @@ describe('gathering simulation', () => {
     expect(w.seen).toContain('game-meat');
   });
 
+  it('food spoils by kind, season and storage', () => {
+    const w = createWorld(7);
+    w.villagers = [];
+    w.stockpile = { fish: 100, 'dried-meat': 100, 'game-meat': 100 };
+    for (let i = 0; i < 2400; i++) tick(w, 0.5); // one spring day in the open
+    expect(w.stockpile.fish).toBeLessThan(65);
+    expect(w.stockpile['dried-meat']).toBeGreaterThan(98);
+    const springMeat = w.stockpile['game-meat'];
+    // An ice house stocked with ice keeps meat far better.
+    w.stockpile = { 'game-meat': 100, ice: 50 };
+    w.built.push('ice-house');
+    for (let i = 0; i < 2400; i++) tick(w, 0.5);
+    expect(w.stockpile['game-meat']).toBeGreaterThan(springMeat + 20);
+    expect(w.stockpile.ice).toBeLessThan(50);
+    expect(w.spoilage.yesterday).toBeGreaterThan(0);
+  });
+
   it('villagers make discoveries from their work and build inventions', () => {
     const w = createWorld(7);
     for (let i = 0; i < 2400 * 8; i++) tick(w, 0.5); // eight days

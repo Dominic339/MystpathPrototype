@@ -378,7 +378,8 @@ function renderPanel(): void {
   const making = [...st.projects.map((p) => `${p.name} (${pct(p.progress)} built)`), ...st.built.map((b) => `${b} ✓`)];
   panel.innerHTML = `<button class="close" aria-label="Close">×</button><h3>Civilization</h3>
     <div class="row"><b>${st.era} era</b>${st.nextEra ? `<span class="quiet">${st.nextEra.name}: ${st.nextEra.have} of ${st.nextEra.need} discoveries</span>` : ''}</div>
-    <div class="quiet">Food on hand: ${st.food.toFixed(1)} days for one person</div>
+    <div class="quiet">Food on hand: ${st.food.toFixed(1)} days for one person · spoiled yesterday: ${st.spoiledYesterday.toFixed(1)}</div>
+    <div class="quiet">Food storage: ${st.storage.length ? st.storage.join(', ') : 'none yet (open air)'}</div>
     <h4>Discoveries</h4><ul>${disc}</ul>
     ${making.length ? `<h4>Inventions</h4><ul>${making.map((m) => `<li>${m}</li>`).join('')}</ul>` : ''}
     <h4>Chronicle</h4><ul class="chronicle">${events}</ul>

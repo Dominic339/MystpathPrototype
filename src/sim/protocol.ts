@@ -48,6 +48,9 @@ export interface Stats {
   nextEra: { name: string; have: number; need: number } | null;
   events: { day: number; text: string }[];
   built: string[];
+  /** Food storage in use, and food lost to spoiling yesterday (days of food for one person). */
+  storage: string[];
+  spoiledYesterday: number;
   projects: { name: string; progress: number }[];
 }
 

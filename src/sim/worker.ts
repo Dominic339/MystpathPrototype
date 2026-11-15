@@ -15,6 +15,7 @@ import { ACTIVITY_CODES, HERD_STRIDE, VILLAGER_STRIDE, type FromSim, type Stats,
 import { saveWorld } from './save';
 import { LAKE, RIVER } from './testScene';
 import { carryCategory, foodTotal, level } from './villagerAI';
+import { activeStorage } from './food';
 import { calendar } from './time';
 import { createWorld, grantAll, tick, type World } from './world';
 
@@ -86,6 +87,8 @@ function stats(w: World): Stats {
     nextEra: next ? { name: ERA_NAMES[next], have: w.discoveries.filter((id) => DISCOVERY_BY_ID.get(id)?.era === next).length, need: ERA_THRESHOLD } : null,
     events: w.events.slice(-12).reverse().map((e) => ({ day: calendar(e.t).dayIndex + 1, text: e.text })),
     built: w.built.map((id) => DISCOVERY_BY_ID.get(id)?.name ?? id),
+    storage: activeStorage(w).map((s) => s.name),
+    spoiledYesterday: w.spoilage.yesterday,
     projects: Object.entries(w.projects).map(([id, done]) => {
       const d = DISCOVERY_BY_ID.get(id)!;
       return { name: d.name, progress: Math.min(1, done / d.build!.seconds) };

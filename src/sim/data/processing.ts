@@ -13,6 +13,8 @@ export interface Recipe {
   inputs: Readonly<Record<string, number>>;
   outputs: Readonly<Record<string, number>>;
   seconds: number;
+  /** Discoveries needed before villagers can make it. */
+  requires?: readonly string[];
 }
 
 /** Processed goods (anything a recipe makes that is not a base material). */
@@ -35,10 +37,10 @@ export const PRODUCTS: Readonly<Record<string, string>> = {
   'carved-jade': 'Carved jade', 'amber-beads': 'Amber beads', leather: 'Leather', pelts: 'Pelts', linen: 'Linen', 'cotton-cloth': 'Cotton cloth', 'wool-cloth': 'Woollen cloth',
   canvas: 'Canvas', baskets: 'Baskets and mats', rope: 'Rope', dye: 'Dye', medicine: 'Medicine', candles: 'Candles and soap', 'wax-and-honey': 'Beeswax and honey',
   'meat-cuts': 'Meat cuts', 'smoked-fish': 'Smoked fish', 'smoked-meat': 'Smoked meat', flour: 'Flour', bread: 'Bread', preserves: 'Preserves', 'spice-blend': 'Spice blend',
-  'egg-dishes': 'Egg dishes', cheese: 'Cheese', 'roast-poultry': 'Roast poultry', 'mana-cell': 'Mana cell', 'heat-core': 'Heat core', 'cold-core': 'Cold core', 'levitation-core': 'Levitation core', 'spirit-focus': 'Spirit focus',
+  'egg-dishes': 'Egg dishes', cheese: 'Cheese', 'salted-meat': 'Salted meat', 'salted-fish': 'Salted fish', pickles: 'Pickles', 'canned-food': 'Canned food', 'roast-poultry': 'Roast poultry', 'mana-cell': 'Mana cell', 'heat-core': 'Heat core', 'cold-core': 'Cold core', 'levitation-core': 'Levitation core', 'spirit-focus': 'Spirit focus',
 };
 
-const r = (id: string, name: string, facility: string, era: EraId, inputs: Record<string, number>, outputs: Record<string, number>, seconds = 60): Recipe => ({ id, name, facility, era, inputs, outputs, seconds });
+const r = (id: string, name: string, facility: string, era: EraId, inputs: Record<string, number>, outputs: Record<string, number>, seconds = 60, requires?: string[]): Recipe => ({ id, name, facility, era, inputs, outputs, seconds, requires });
 
 export const RECIPES: readonly Recipe[] = [
   // Hunter-gatherer camp
@@ -55,6 +57,10 @@ export const RECIPES: readonly Recipe[] = [
   r('make-resin-glue', 'Make resin glue', 'campfire', 'hunter-gatherer', { resin: 2 }, { 'resin-glue': 1 }, 25),
   r('boil-water', 'Boil water', 'campfire', 'hunter-gatherer', { 'fresh-water': 1 }, { 'drinking-water': 1 }, 10),
   r('melt-ice', 'Melt ice', 'campfire', 'hunter-gatherer', { ice: 1 }, { 'fresh-water': 1 }, 10),
+  // Preserving over the fire, once discovered.
+  r('smoke-meat-fire', 'Smoke meat over the fire', 'campfire', 'stone', { 'game-meat': 2 }, { 'smoked-meat': 2 }, 120, ['smoking']),
+  r('smoke-fish-fire', 'Smoke fish over the fire', 'campfire', 'stone', { fish: 2 }, { 'smoked-fish': 2 }, 100, ['smoking']),
+  r('honey-preserves', 'Make honey preserves', 'campfire', 'stone', { berries: 4, honey: 1 }, { preserves: 2 }, 90, ['preserving']),
   r('knap-flint', 'Knap flint tools', 'knapping-spot', 'hunter-gatherer', { flint: 1 }, { 'stone-tools': 1 }, 40),
   r('knap-obsidian', 'Knap obsidian blades', 'knapping-spot', 'hunter-gatherer', { obsidian: 1 }, { 'obsidian-blades': 1 }, 40),
   r('shape-stone', 'Shape stone tools', 'knapping-spot', 'hunter-gatherer', { stone: 2 }, { 'stone-tools': 1 }, 50),
@@ -177,15 +183,20 @@ export const RECIPES: readonly Recipe[] = [
   r('smoke-meat', 'Smoke meat', 'smokehouse', 'stone', { 'game-meat': 2 }, { 'smoked-meat': 2 }, 120),
   r('mill-flour', 'Mill flour', 'mill', 'iron', { 'wild-grain': 3 }, { flour: 2 }, 60),
   r('bake-bread', 'Bake bread', 'kitchen', 'iron', { flour: 2, 'fresh-water': 1 }, { bread: 3 }, 90),
-  r('make-preserves', 'Make preserves', 'kitchen', 'stone', { berries: 4, honey: 1 }, { preserves: 2 }, 90),
+  r('make-preserves', 'Make preserves', 'kitchen', 'stone', { berries: 4, honey: 1 }, { preserves: 2 }, 90, ['preserving']),
   r('preserve-fruit', 'Preserve fruit', 'kitchen', 'stone', { 'wild-fruit': 3 }, { preserves: 1 }, 90),
-  r('make-cheese', 'Make cheese', 'kitchen', 'stone', { milk: 4 }, { cheese: 1 }, 120),
+  r('make-cheese', 'Make cheese', 'kitchen', 'stone', { milk: 4 }, { cheese: 1 }, 120, ['fermenting']),
+  r('salt-meat', 'Salt meat', 'kitchen', 'iron', { 'game-meat': 2, salt: 1 }, { 'salted-meat': 2 }, 90, ['salting']),
+  r('salt-fish', 'Salt fish', 'kitchen', 'iron', { fish: 2, salt: 1 }, { 'salted-fish': 2 }, 90, ['salting']),
+  r('pickle-roots', 'Pickle roots', 'kitchen', 'iron', { roots: 3, salt: 1 }, { pickles: 3 }, 90, ['fermenting', 'salting']),
+  r('can-meat', 'Can meat', 'cannery', 'industrial', { 'cooked-meat': 4, 'tin-ingot': 1 }, { 'canned-food': 4 }, 90, ['canning']),
+  r('can-fish', 'Can fish', 'cannery', 'industrial', { 'cooked-fish': 4, 'tin-ingot': 1 }, { 'canned-food': 4 }, 90, ['canning']),
   r('blend-spices', 'Blend spices', 'kitchen', 'iron', { spices: 2 }, { 'spice-blend': 1 }, 60),
 
   // Magic
   r('attune-mana', 'Attune mana cell', 'crystal-attuner', 'medieval', { 'mana-crystal': 2 }, { 'mana-cell': 1 }, 150),
   r('bind-ember', 'Bind heat core', 'crystal-attuner', 'medieval', { 'ember-stone': 2 }, { 'heat-core': 1 }, 150),
-  r('bind-frost', 'Bind cold core', 'crystal-attuner', 'medieval', { 'frost-shard': 2 }, { 'cold-core': 1 }, 150),
+  r('bind-frost', 'Bind cold core', 'crystal-attuner', 'medieval', { 'frost-shard': 2 }, { 'cold-core': 1 }, 150, ['cold-binding']),
   r('shape-spirit-focus', 'Shape spirit focus', 'crystal-attuner', 'medieval', { 'spirit-wood': 1 }, { 'spirit-focus': 1 }, 180),
   r('cut-levitation-core', 'Cut levitation core', 'levitation-workshop', 'renaissance', { 'hover-stone': 2 }, { 'levitation-core': 1 }, 180),
 ];

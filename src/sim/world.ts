@@ -4,7 +4,7 @@
 import { PASSIONS, type Passion } from './data/jobs';
 import { stepHerds, type Herd } from './animals';
 import { DISCOVERIES } from './data/discoveries';
-import { MATERIAL_BY_ID } from './data/materials';
+import { spoilFood } from './food';
 import { NavGrid } from './pathfinding';
 import { buildHexResources, buildNodes, regrowResources, type HexResources, type ResourceNode } from './resources';
 import { Rng, subSeed } from './rng';
@@ -62,6 +62,8 @@ export interface World {
   built: string[];
   /** Inventions under construction: work done so far, in game seconds. */
   projects: Record<string, number>;
+  /** Food value lost to spoiling, today and yesterday. */
+  spoilage: { day: number; today: number; yesterday: number };
   /** The chronicle: notable things that happened. */
   events: { t: number; text: string }[];
   nav: NavGrid;
@@ -130,6 +132,7 @@ export function createWorld(seed: number): World {
     seen: [],
     built: [],
     projects: {},
+    spoilage: { day: 0, today: 0, yesterday: 0 },
     events: [],
     nav: new NavGrid(scene.terrain),
     villagers,
@@ -160,8 +163,6 @@ export function tick(world: World, dt: number): void {
   const watchers = world.villagers.filter((v) => v.activity !== 'sleeping').map((v) => ({ x: v.x, z: v.z, stealth: v.task?.kind === 'gather' && v.task.stage === 'stalking' ? 0.6 : 0 }));
   stepHerds(world.herds, world.terrain, watchers, season, world.rng, dt);
   regrowResources(world.nodes, season, dt);
-  // Raw food and other perishables spoil in store (about a quarter a day) unless processed.
-  for (const id in world.stockpile)
-    if (MATERIAL_BY_ID.get(id)?.perishable && world.stockpile[id] > 0) world.stockpile[id] -= world.stockpile[id] * (dt / 4800);
+  spoilFood(world, season, dt);
   world.nav.regrow(dt);
 }

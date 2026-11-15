@@ -75,6 +75,7 @@ export const FACILITIES: readonly Facility[] = [
   f('smokehouse', 'Smokehouse', 'processing', 'stone', 'cook', 1, 2),
   f('mill', 'Mill', 'processing', 'iron', 'farmer', 1, 2),
   f('kitchen', 'Kitchen', 'processing', 'stone', 'cook', 1, 3),
+  f('cannery', 'Cannery', 'processing', 'industrial', 'cook', 1, 3),
   f('weaver', 'Weaver', 'processing', 'stone', 'weaver', 1, 3),
   f('ropewalk', 'Ropewalk', 'processing', 'iron', 'weaver', 2, 2),
   f('dye-works', 'Dye works', 'processing', 'iron', 'dyer', 1, 2),
