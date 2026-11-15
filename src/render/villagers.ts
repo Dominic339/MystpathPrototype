@@ -1,0 +1,486 @@
+// Hunter-gatherer villagers: stylised but properly jointed human figures —
+// shoulders, elbows, wrists, hands with thumbs, hips, knees and feet — readable from the
+// management camera and convincing up close.
+
+import * as THREE from 'three';
+import type { Heightfield } from '../sim/terrain';
+import { ACTIVITY_CODES, VILLAGER_STRIDE } from '../sim/protocol';
+
+interface Look {
+  skin: string;
+  hair: string;
+  tunic: string;
+  trim: string;
+  wraps: string;
+  build: number; // 0.92 slight … 1.08 broad
+  height: number;
+  hairStyle: 'braid' | 'band' | 'bun' | 'short';
+}
+
+const LOOKS: Look[] = [
+  { skin: '#c99872', hair: '#2b1d14', tunic: '#8a6440', trim: '#d8c09a', wraps: '#5a4030', build: 1.0, height: 1.0, hairStyle: 'braid' },
+  { skin: '#8d5a3b', hair: '#140e0b', tunic: '#a07b52', trim: '#6e2f22', wraps: '#4a3526', build: 1.07, height: 1.04, hairStyle: 'short' },
+  { skin: '#e0b48f', hair: '#7a4a24', tunic: '#6f5a3e', trim: '#c9b080', wraps: '#3f3022', build: 0.93, height: 0.96, hairStyle: 'bun' },
+  { skin: '#a8724c', hair: '#1f1612', tunic: '#94704a', trim: '#2f4a5a', wraps: '#5b4532', build: 1.03, height: 1.02, hairStyle: 'band' },
+  { skin: '#d6a47c', hair: '#4a2f1c', tunic: '#7b5a3a', trim: '#a8452e', wraps: '#4c392a', build: 0.95, height: 0.97, hairStyle: 'braid' },
+  { skin: '#6f452c', hair: '#0f0b09', tunic: '#b08a5e', trim: '#e2d2b0', wraps: '#55402e', build: 1.05, height: 1.01, hairStyle: 'short' },
+];
+
+/** Bundle colours by material category: stone, ore, minerals, gems, water, plants, animal, magic. */
+const CARRY_COLORS = ['#8d877c', '#6e5a4e', '#4a4440', '#8a5fb0', '#5d7fa0', '#7a6a3a', '#9a6a46', '#5fb0c0'];
+
+const THIGH = 0.44;
+const SHIN = 0.42;
+const ANKLE = 0.07;
+const HIP_HEIGHT = THIGH + SHIN + ANKLE;
+const UPPER_ARM = 0.29;
+const FOREARM = 0.25;
+
+const mats = new Map<string, THREE.MeshStandardMaterial>();
+function mat(c: string, roughness = 0.85): THREE.MeshStandardMaterial {
+  const key = `${c}:${roughness}`;
+  if (!mats.has(key)) mats.set(key, new THREE.MeshStandardMaterial({ color: c, roughness }));
+  return mats.get(key)!;
+}
+
+/** A tapered limb segment hanging down from its joint, with a slight muscle bulge and rounded ends. */
+function limbSegment(length: number, rTop: number, rBottom: number, bulge = 0.12, radial = 10): THREE.BufferGeometry {
+  const pts: THREE.Vector2[] = [new THREE.Vector2(0, rTop * 0.75), new THREE.Vector2(rTop * 0.72, rTop * 0.52)];
+  const steps = 8;
+  for (let i = 0; i <= steps; i++) {
+    const t = i / steps;
+    const r = (rTop + (rBottom - rTop) * t) * (1 + bulge * Math.sin(Math.PI * Math.min(1, t * 1.3)));
+    pts.push(new THREE.Vector2(r, -t * length));
+  }
+  pts.push(new THREE.Vector2(rBottom * 0.72, -length - rBottom * 0.52), new THREE.Vector2(0, -length - rBottom * 0.75));
+  // Lathe wants the profile from bottom to top for outward normals.
+  return new THREE.LatheGeometry(pts.reverse(), radial);
+}
+
+function hand(skin: THREE.Material, side: number): THREE.Group {
+  const g = new THREE.Group();
+  const palm = new THREE.Mesh(new THREE.CapsuleGeometry(0.032, 0.05, 3, 8), skin);
+  palm.scale.set(1.25, 1, 0.62);
+  palm.position.y = -0.045;
+  g.add(palm);
+  // Four fingers, slightly curled.
+  for (let f = 0; f < 4; f++) {
+    const finger = new THREE.Group();
+    finger.position.set((f - 1.5) * 0.017, -0.085, 0.004);
+    finger.rotation.x = 0.35;
+    const seg = new THREE.Mesh(new THREE.CapsuleGeometry(0.0085, 0.038 - Math.abs(f - 1.4) * 0.006, 2, 5), skin);
+    seg.position.y = -0.022;
+    finger.add(seg);
+    g.add(finger);
+  }
+  // Opposable thumb.
+  const thumb = new THREE.Group();
+  thumb.position.set(side * -0.03, -0.035, 0.012);
+  thumb.rotation.set(0.5, 0, side * -0.7);
+  const tseg = new THREE.Mesh(new THREE.CapsuleGeometry(0.01, 0.035, 2, 5), skin);
+  tseg.position.y = -0.02;
+  thumb.add(tseg);
+  g.add(thumb);
+  return g;
+}
+
+export interface Figure {
+  root: THREE.Group;
+  hips: THREE.Group;
+  spine: THREE.Group;
+  head: THREE.Group;
+  thighL: THREE.Group;
+  thighR: THREE.Group;
+  kneeL: THREE.Group;
+  kneeR: THREE.Group;
+  shoulderL: THREE.Group;
+  shoulderR: THREE.Group;
+  elbowL: THREE.Group;
+  elbowR: THREE.Group;
+  skirtL: THREE.Group;
+  skirtR: THREE.Group;
+  /** Pose being shown, eased toward each new target so transitions are smooth. */
+  current: PoseParams | null;
+  walkBlend: number;
+  vx: number;
+  vz: number;
+  carry: number;
+  bundle: THREE.Mesh;
+  x: number;
+  z: number;
+  heading: number;
+  tx: number;
+  tz: number;
+  theading: number;
+  activity: number;
+  phase: number;
+}
+
+export function makeFigure(lookIndex: number, seed: number): Figure {
+  const look = LOOKS[lookIndex % LOOKS.length];
+  const root = new THREE.Group();
+  const skin = mat(look.skin, 0.7);
+  const tunic = mat(look.tunic, 0.95);
+  const trim = mat(look.trim, 0.9);
+  const wraps = mat(look.wraps, 0.95);
+  const hairM = mat(look.hair, 0.8);
+  const hide = mat('#3b2a1e', 0.95);
+  const b = look.build;
+
+  const mesh = (parent: THREE.Object3D, geo: THREE.BufferGeometry, m: THREE.Material, x = 0, y = 0, z = 0) => {
+    const o = new THREE.Mesh(geo, m);
+    o.position.set(x, y, z);
+    o.castShadow = true;
+    parent.add(o);
+    return o;
+  };
+  const joint = (parent: THREE.Object3D, x: number, y: number, z: number) => {
+    const g = new THREE.Group();
+    g.position.set(x, y, z);
+    parent.add(g);
+    return g;
+  };
+
+  const hips = joint(root, 0, HIP_HEIGHT, 0);
+  // Pelvis.
+  mesh(hips, new THREE.SphereGeometry(0.15 * b, 14, 10), wraps, 0, 0.02, 0).scale.set(1.05, 0.7, 0.75);
+
+  // Legs: thigh → knee → shin → ankle → foot.
+  const leg = (side: number) => {
+    const thigh = joint(hips, side * 0.095 * b, -0.02, 0);
+    mesh(thigh, limbSegment(THIGH, 0.085 * b, 0.06 * b, 0.1), wraps);
+    const knee = joint(thigh, 0, -THIGH, 0);
+    mesh(knee, new THREE.SphereGeometry(0.058 * b, 10, 8), wraps);
+    mesh(knee, limbSegment(SHIN, 0.06 * b, 0.04 * b, 0.18), wraps);
+    // Leather wraps around the calf.
+    for (let k = 0; k < 3; k++) mesh(knee, new THREE.TorusGeometry(0.056 * b - k * 0.004, 0.009, 5, 12), hide, 0, -0.14 - k * 0.08, 0).rotation.x = Math.PI / 2;
+    const ankle = joint(knee, 0, -SHIN, 0);
+    const foot = mesh(ankle, new THREE.CapsuleGeometry(0.045, 0.12, 3, 8), hide, 0, -0.035, 0.05);
+    foot.rotation.x = Math.PI / 2;
+    foot.scale.set(1.05, 1, 0.75);
+    return { thigh, knee };
+  };
+  const L = leg(-1);
+  const R = leg(1);
+
+  // Torso: spine pivots at the waist; chest broader than waist, with shoulders and a neck.
+  const spine = joint(hips, 0, 0.06, 0);
+  const torsoProfile = [
+    new THREE.Vector2(0.0, 0.0),
+    new THREE.Vector2(0.15, 0.0),
+    new THREE.Vector2(0.135, 0.12), // waist
+    new THREE.Vector2(0.16, 0.26),
+    new THREE.Vector2(0.185, 0.38), // chest
+    new THREE.Vector2(0.17, 0.46),
+    new THREE.Vector2(0.11, 0.52), // shoulders slope to neck
+    new THREE.Vector2(0.05, 0.545),
+    new THREE.Vector2(0.0, 0.55),
+  ];
+  const torso = mesh(spine, new THREE.LatheGeometry(torsoProfile, 16), skin);
+  torso.scale.set(1.08 * b, 1, 0.7 * b);
+
+  // Fur tunic over the torso, flaring to mid-thigh, with a fringed hem and belt.
+  const tunicProfile = [
+    new THREE.Vector2(0.0, -0.05),
+    new THREE.Vector2(0.168, -0.05),
+    new THREE.Vector2(0.17, 0.0),
+    new THREE.Vector2(0.155, 0.12),
+    new THREE.Vector2(0.175, 0.26),
+    new THREE.Vector2(0.195, 0.38),
+    new THREE.Vector2(0.18, 0.465),
+    new THREE.Vector2(0.12, 0.525),
+    new THREE.Vector2(0.075, 0.55),
+  ];
+  const tunicMesh = mesh(spine, new THREE.LatheGeometry(tunicProfile, 16), tunic);
+  tunicMesh.scale.set(1.1 * b, 1, 0.74 * b);
+  // Skirt of the tunic: left and right halves hang from the hips and swing with each thigh,
+  // so legs never push through the cloth. The halves overlap slightly at front and back.
+  const skirtHalf = (side: number) => {
+    const g = new THREE.Group();
+    hips.add(g);
+    const start = side < 0 ? Math.PI - 0.18 : -0.18;
+    const panel = mesh(g, new THREE.CylinderGeometry(0.172, 0.232, 0.36, 10, 2, true, start, Math.PI + 0.36), tunic, 0, -0.12, 0);
+    panel.scale.set(1.12 * b, 1, 0.78 * b);
+    (panel.material as THREE.Material).side = THREE.DoubleSide;
+    const hemPart = mesh(g, new THREE.CylinderGeometry(0.234, 0.244, 0.045, 10, 1, true, start, Math.PI + 0.36), trim, 0, -0.3, 0);
+    hemPart.scale.set(1.12 * b, 1, 0.78 * b);
+    return g;
+  };
+  const skirtL = skirtHalf(-1);
+  const skirtR = skirtHalf(1);
+  const belt = mesh(spine, new THREE.TorusGeometry(0.16, 0.018, 6, 18), hide, 0, 0.11, 0);
+  belt.rotation.x = Math.PI / 2;
+  belt.scale.set(1.08 * b, 0.72 * b, 1);
+  mesh(spine, new THREE.SphereGeometry(0.03, 8, 6), mat('#c9b27a'), 0.07 * b, 0.1, 0.11 * b); // belt pouch toggle
+  // Fur collar.
+  const collar = mesh(spine, new THREE.TorusGeometry(0.11, 0.045, 8, 16), trim, 0, 0.5, 0);
+  collar.rotation.x = Math.PI / 2;
+  collar.scale.set(1.25 * b, 0.9 * b, 1);
+
+  // Arms: shoulder → upper arm → elbow → forearm → wrist → hand.
+  const arm = (side: number) => {
+    const shoulder = joint(spine, side * 0.2 * b, 0.47, 0);
+    mesh(shoulder, new THREE.SphereGeometry(0.06 * b, 10, 8), tunic);
+    mesh(shoulder, limbSegment(UPPER_ARM, 0.058 * b, 0.045 * b, 0.15), skin);
+    const sleeve = mesh(shoulder, new THREE.CylinderGeometry(0.064 * b, 0.058 * b, 0.14, 10), tunic, 0, -0.06, 0);
+    sleeve.scale.z = 0.95;
+    const elbow = joint(shoulder, 0, -UPPER_ARM, 0);
+    mesh(elbow, new THREE.SphereGeometry(0.044 * b, 8, 6), skin);
+    mesh(elbow, limbSegment(FOREARM, 0.044 * b, 0.032 * b, 0.12), skin);
+    mesh(elbow, new THREE.TorusGeometry(0.036, 0.008, 5, 10), hide, 0, -FOREARM + 0.03, 0).rotation.x = Math.PI / 2; // wrist band
+    const wrist = joint(elbow, 0, -FOREARM - 0.01, 0);
+    const h = hand(skin, side);
+    h.rotation.y = side * 0.4;
+    wrist.add(h);
+    shoulder.rotation.z = side * 0.09;
+    return { shoulder, elbow };
+  };
+  const AL = arm(-1);
+  const AR = arm(1);
+
+  // Head: neck, skull with jaw, ears, brow, nose, eyes, and a hairstyle.
+  const head = joint(spine, 0, 0.56, 0);
+  mesh(head, new THREE.CylinderGeometry(0.045, 0.055, 0.1, 10), skin, 0, 0.03, 0);
+  const skull = mesh(head, new THREE.SphereGeometry(0.115, 18, 14), skin, 0, 0.17, 0);
+  skull.scale.set(0.92, 1.08, 1.02);
+  const jaw = mesh(head, new THREE.SphereGeometry(0.085, 14, 10), skin, 0, 0.11, 0.025);
+  jaw.scale.set(1, 0.85, 1);
+  for (const s of [-1, 1]) {
+    mesh(head, new THREE.SphereGeometry(0.024, 8, 6), skin, s * 0.105, 0.165, 0).scale.set(0.5, 1, 0.8); // ears
+    mesh(head, new THREE.SphereGeometry(0.014, 8, 6), mat('#f2ece0', 0.4), s * 0.038, 0.18, 0.1); // eye whites
+    mesh(head, new THREE.SphereGeometry(0.0085, 8, 6), mat('#1a120c', 0.3), s * 0.038, 0.18, 0.112); // irises
+    const brow = mesh(head, new THREE.CapsuleGeometry(0.008, 0.03, 2, 4), hairM, s * 0.04, 0.205, 0.103);
+    brow.rotation.z = Math.PI / 2 + s * 0.12;
+  }
+  const nose = mesh(head, new THREE.ConeGeometry(0.018, 0.045, 6), skin, 0, 0.155, 0.118);
+  nose.rotation.x = Math.PI / 2.4;
+  mesh(head, new THREE.CapsuleGeometry(0.006, 0.03, 2, 4), mat('#7a3f33', 0.6), 0, 0.118, 0.103).rotation.z = Math.PI / 2; // mouth
+
+  const hairCap = mesh(head, new THREE.SphereGeometry(0.122, 18, 12, 0, Math.PI * 2, 0, Math.PI * 0.56), hairM, 0, 0.185, -0.012);
+  hairCap.scale.set(0.96, 1.08, 1.06);
+  if (look.hairStyle === 'braid') {
+    for (let k = 0; k < 4; k++) mesh(head, new THREE.SphereGeometry(0.032 - k * 0.003, 8, 6), hairM, 0, 0.13 - k * 0.055, -0.12 - k * 0.012);
+  } else if (look.hairStyle === 'bun') {
+    mesh(head, new THREE.SphereGeometry(0.055, 10, 8), hairM, 0, 0.27, -0.06);
+  } else if (look.hairStyle === 'band') {
+    const band = mesh(head, new THREE.TorusGeometry(0.118, 0.014, 6, 20), trim, 0, 0.215, 0);
+    band.rotation.x = Math.PI / 2 - 0.15;
+    mesh(head, new THREE.SphereGeometry(0.11, 12, 8, 0, Math.PI * 2, Math.PI * 0.45, Math.PI * 0.3), hairM, 0, 0.16, -0.03); // hair to the nape
+  }
+
+  // A bundle carried on the back when bringing materials home.
+  const bundle = mesh(spine, new THREE.CapsuleGeometry(0.13, 0.22, 3, 8), mat('#8a6a46', 0.95), 0, 0.3, -0.2);
+  bundle.rotation.z = Math.PI / 2;
+  bundle.visible = false;
+
+  root.scale.setScalar(look.height);
+  return {
+    root,
+    hips,
+    spine,
+    head,
+    thighL: L.thigh,
+    thighR: R.thigh,
+    kneeL: L.knee,
+    kneeR: R.knee,
+    shoulderL: AL.shoulder,
+    shoulderR: AR.shoulder,
+    elbowL: AL.elbow,
+    elbowR: AR.elbow,
+    skirtL,
+    skirtR,
+    current: null,
+    walkBlend: 0,
+    vx: 0,
+    vz: 0,
+    carry: -1,
+    bundle,
+    x: 0,
+    z: 0,
+    heading: 0,
+    tx: 0,
+    tz: 0,
+    theading: 0,
+    activity: 0,
+    phase: seed * 1.3,
+  };
+}
+
+/** How far the hips drop for given thigh/knee angles, so feet stay on the ground. */
+function hipDrop(thigh: number, knee: number): number {
+  const legHeight = THIGH * Math.cos(thigh) + SHIN * Math.cos(thigh - knee) + ANKLE;
+  return HIP_HEIGHT - legHeight;
+}
+
+export interface PoseParams {
+  tl: number;
+  tr: number;
+  kl: number;
+  kr: number;
+  sl: number;
+  sr: number;
+  el: number;
+  er: number;
+  spine: number;
+  bob?: number;
+  headYaw?: number;
+}
+
+const POSE_KEYS: (keyof PoseParams)[] = ['tl', 'tr', 'kl', 'kr', 'sl', 'sr', 'el', 'er', 'spine', 'bob', 'headYaw'];
+
+function blendPose(a: PoseParams, b: PoseParams, t: number): PoseParams {
+  const out = { ...a };
+  for (const k of POSE_KEYS) out[k] = (a[k] ?? 0) + ((b[k] ?? 0) - (a[k] ?? 0)) * t;
+  return out;
+}
+
+export function pose(f: Figure, p: PoseParams): void {
+  f.thighL.rotation.x = -p.tl;
+  f.thighR.rotation.x = -p.tr;
+  f.kneeL.rotation.x = p.kl;
+  f.kneeR.rotation.x = p.kr;
+  f.shoulderL.rotation.x = -p.sl;
+  f.shoulderR.rotation.x = -p.sr;
+  f.elbowL.rotation.x = -p.el;
+  f.elbowR.rotation.x = -p.er;
+  f.spine.rotation.x = p.spine;
+  f.head.rotation.y = p.headYaw ?? 0;
+  f.head.rotation.x = -p.spine * 0.5;
+  const drop = Math.min(hipDrop(p.tl, p.kl), hipDrop(p.tr, p.kr));
+  f.hips.position.y = HIP_HEIGHT - Math.max(0, drop) + (p.bob ?? 0);
+  // Skirt halves follow their thighs part of the way, and flare a little when crouching.
+  f.skirtL.rotation.x = -p.tl * 0.75;
+  f.skirtR.rotation.x = -p.tr * 0.75;
+  f.skirtL.rotation.z = -Math.max(0, p.tl - 0.6) * 0.25;
+  f.skirtR.rotation.z = Math.max(0, p.tr - 0.6) * 0.25;
+}
+
+export interface VillagerView {
+  group: THREE.Group;
+  setTargets: (buf: Float32Array) => void;
+  update: (dt: number, time: number) => void;
+  /** World position of a villager, for camera follow. */
+  positionOf: (index: number) => THREE.Vector3 | null;
+}
+
+export function buildVillagers(looks: number[], terrain: Heightfield): VillagerView {
+  const group = new THREE.Group();
+  group.name = 'villagers';
+  const figures = looks.map((l, i) => {
+    const f = makeFigure(l, i);
+    group.add(f.root);
+    return f;
+  });
+  let initialised = false;
+  let tickAt = performance.now();
+
+  return {
+    group,
+    positionOf: (i) => (figures[i] ? figures[i].root.position.clone() : null),
+    setTargets(buf) {
+      tickAt = performance.now();
+      figures.forEach((f, k) => {
+        const o = k * VILLAGER_STRIDE;
+        f.tx = buf[o];
+        f.tz = buf[o + 1];
+        f.theading = buf[o + 2];
+        f.activity = buf[o + 3];
+        f.vx = buf[o + 4];
+        f.vz = buf[o + 5];
+        if (f.carry !== buf[o + 6]) {
+          f.carry = buf[o + 6];
+          f.bundle.visible = f.carry >= 0;
+          if (f.carry >= 0) f.bundle.material = mat(CARRY_COLORS[f.carry] ?? '#8a6a46', 0.95);
+        }
+        if (!initialised) {
+          f.x = f.tx;
+          f.z = f.tz;
+          f.heading = f.theading;
+        }
+      });
+      initialised = true;
+    },
+    update(dt, time) {
+      const since = (performance.now() - tickAt) / 1000;
+      for (const f of figures) {
+        // Predict where the simulation has them now (last position + velocity), then ease
+        // toward it: smooth motion between the simulation's 10 updates per second.
+        const px = f.tx + f.vx * Math.min(0.3, since);
+        const pz = f.tz + f.vz * Math.min(0.3, since);
+        const k = Math.min(1, dt * 10);
+        const ox = f.x;
+        const oz = f.z;
+        f.x += (px - f.x) * k;
+        f.z += (pz - f.z) * k;
+        const moving = Math.hypot(f.vx, f.vz) > 0.1;
+        const want = moving ? Math.atan2(f.vx, f.vz) : f.theading;
+        let dh = want - f.heading;
+        dh = Math.atan2(Math.sin(dh), Math.cos(dh));
+        f.heading += dh * Math.min(1, dt * 8);
+        f.root.position.set(f.x, terrain.sample(f.x, f.z), f.z);
+        f.root.rotation.y = f.heading;
+        const actName = ACTIVITY_CODES[f.activity] ?? 'resting';
+        // Asleep in the tent.
+        f.root.visible = actName !== 'sleeping';
+
+        // Drive the walk cycle from the distance actually covered, so feet never slide.
+        const moved = Math.hypot(f.x - ox, f.z - oz);
+        const speed = dt > 0 ? moved / dt : 0;
+        const act = actName;
+        const walking = act === 'walking' && speed > 0.15;
+        f.walkBlend += ((walking ? 1 : 0) - f.walkBlend) * Math.min(1, dt * 6);
+        const STRIDE = 1.55; // metres per full cycle (two steps)
+        f.phase += walking ? (moved / STRIDE) * Math.PI * 2 : dt * 1.5;
+        const s = Math.sin(f.phase);
+        const c = Math.cos(f.phase);
+        // Stride length scales gently with speed; the swing leg's knee bends as it comes forward.
+        const amp = THREE.MathUtils.clamp(0.25 + speed * 0.18, 0.25, 0.55);
+        const walkPose: PoseParams = {
+          tl: s * amp,
+          tr: -s * amp,
+          kl: Math.max(0, c) * (0.35 + amp) + 0.06,
+          kr: Math.max(0, -c) * (0.35 + amp) + 0.06,
+          sl: -s * amp * 0.8,
+          sr: s * amp * 0.8,
+          el: 0.3 + Math.max(0, -s) * 0.25,
+          er: 0.3 + Math.max(0, s) * 0.25,
+          spine: 0.05,
+          bob: Math.abs(s) * -0.025 + 0.012,
+          headYaw: 0,
+        };
+
+        let target: PoseParams;
+        if (act === 'gathering') {
+          const pick = Math.sin(time * 3 + f.phase);
+          target = { tl: 0.55, tr: 0.25, kl: 0.9, kr: 0.45, sl: 1.0 + pick * 0.2, sr: 0.8 - pick * 0.2, el: 0.6, er: 0.9, spine: 0.55 + Math.sin(time * 2.2 + f.phase) * 0.08, bob: 0, headYaw: 0 };
+        } else if (act === 'crafting') {
+          // Kneel at the fire or work spot, hands busy in front.
+          const work = Math.sin(time * 4 + f.phase);
+          target = { tl: 1.25, tr: 0.2, kl: 2.0, kr: 1.75, sl: 0.9 + work * 0.15, sr: 0.75 - work * 0.15, el: 0.9, er: 1.0, spine: 0.3, bob: 0, headYaw: 0 };
+        } else if (act === 'fetching-water') {
+          target = { tl: 1.35, tr: 1.0, kl: 2.2, kr: 1.9, sl: 1.1, sr: 1.25, el: 0.4, er: 0.5, spine: 0.4, bob: 0, headYaw: 0 };
+        } else {
+          // Idle: weight shifts and small gestures.
+          const g = Math.sin(time * 1.1 + f.phase);
+          target = {
+            tl: 0.02,
+            tr: -0.04 + Math.sin(time * 0.3 + f.phase) * 0.04,
+            kl: 0.05,
+            kr: 0.12,
+            sl: Math.sin(time * 0.7 + f.phase) * 0.08,
+            sr: 0.3 + g * 0.25,
+            el: 0.2,
+            er: 0.9 + g * 0.35,
+            spine: 0,
+            bob: 0,
+            headYaw: Math.sin(time * 0.4 + f.phase) * 0.45,
+          };
+        }
+        target = blendPose(target, walkPose, f.walkBlend);
+        // Ease the displayed pose toward the target (the walk itself is applied directly).
+        f.current = f.current ? blendPose(f.current, target, f.walkBlend > 0.5 ? 1 : Math.min(1, dt * 5)) : target;
+        pose(f, f.current);
+      }
+    },
+  };
+}
