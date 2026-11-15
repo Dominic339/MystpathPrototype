@@ -2,6 +2,8 @@
 // Each has one source: the ground (collected from the tile), below ground (quarried, mined,
 // drilled), water, a plant species, or an animal species. Living things never sit in tile pools.
 
+import type { EraId } from './eras';
+
 export type Layer = 'ground' | 'below' | 'water' | 'plant' | 'animal';
 export type Category = 'stone-earth' | 'ore' | 'fuel-mineral' | 'gem' | 'water' | 'plant' | 'animal' | 'magic';
 export type Rarity = 'common' | 'uncommon' | 'rare' | 'very-rare';
@@ -18,9 +20,13 @@ export interface Material {
   proposed?: boolean;
   /** Only comes from farming or kept animals, never found wild. */
   farmedOnly?: boolean;
+  /** The age when people can first recognise and work it (set from UNLOCKS below). */
+  era: EraId;
+  /** A discovery needed before it can be recognised at all (magical materials). */
+  knowledge?: string;
 }
 
-const m = (id: string, name: string, category: Category, layer: Layer, rarity: Rarity = 'common', extra: Partial<Material> = {}): Material => ({ id, name, category, layer, rarity, ...extra });
+const m = (id: string, name: string, category: Category, layer: Layer, rarity: Rarity = 'common', extra: Partial<Material> = {}): Material => ({ id, name, category, layer, rarity, era: 'hunter-gatherer', ...extra });
 
 export const MATERIALS: readonly Material[] = [
   // Stone and earth (18)
@@ -143,6 +149,28 @@ export const MATERIALS: readonly Material[] = [
   m('moonsilver-ore', 'Moonsilver ore', 'magic', 'below', 'very-rare', { proposed: true }),
   m('spirit-wood', 'Spirit wood', 'magic', 'plant', 'very-rare', { proposed: true }),
 ];
+
+/**
+ * When each material can first be worked. Hunter-gatherers use what lies to hand (stone,
+ * flint, clay, river gold, amber, everything living). Quarried stone comes with the Stone
+ * age; ores, coal and gems with the Iron age; the strange minerals of later chemistry, and
+ * the deep ores of industry and the modern world, much later. Magical materials cannot even
+ * be recognised until someone learns arcane sight.
+ */
+const UNLOCKS: Record<string, { era: EraId; knowledge?: string }> = {
+  limestone: { era: 'stone' }, sandstone: { era: 'stone' }, slate: { era: 'stone' }, kaolin: { era: 'stone' }, gypsum: { era: 'stone' }, bitumen: { era: 'stone' }, 'tin-ore': { era: 'stone' },
+  'iron-ore': { era: 'iron' }, 'copper-ore': { era: 'iron' }, 'lead-ore': { era: 'iron' }, 'zinc-ore': { era: 'iron' }, 'silver-ore': { era: 'iron' }, coal: { era: 'iron' }, lignite: { era: 'iron' },
+  marble: { era: 'iron' }, quartz: { era: 'iron' }, mica: { era: 'iron' }, feldspar: { era: 'iron' }, sulfur: { era: 'iron' }, potash: { era: 'iron' }, amethyst: { era: 'iron' }, ruby: { era: 'iron' },
+  sapphire: { era: 'iron' }, emerald: { era: 'iron' },
+  cinnabar: { era: 'medieval' }, 'manganese-ore': { era: 'medieval' }, fluorite: { era: 'medieval' }, barite: { era: 'medieval' }, diamond: { era: 'medieval' },
+  graphite: { era: 'renaissance' }, saltpeter: { era: 'renaissance' }, phosphate: { era: 'renaissance' }, borax: { era: 'renaissance' },
+  bauxite: { era: 'industrial' }, 'nickel-ore': { era: 'industrial' }, chromite: { era: 'industrial' }, 'tungsten-ore': { era: 'industrial' }, 'cobalt-ore': { era: 'industrial' },
+  'platinum-ore': { era: 'industrial' }, 'crude-oil': { era: 'industrial' }, 'natural-gas': { era: 'industrial' },
+  'titanium-ore': { era: 'modern' }, 'lithium-ore': { era: 'modern' }, 'uranium-ore': { era: 'modern' }, 'rare-earth-ore': { era: 'modern' },
+  'mana-crystal': { era: 'medieval', knowledge: 'arcane-sight' }, 'hover-stone': { era: 'medieval', knowledge: 'arcane-sight' }, 'ember-stone': { era: 'medieval', knowledge: 'arcane-sight' },
+  'frost-shard': { era: 'medieval', knowledge: 'arcane-sight' }, 'spirit-wood': { era: 'medieval', knowledge: 'arcane-sight' }, 'moonsilver-ore': { era: 'renaissance', knowledge: 'arcane-sight' },
+};
+for (const mat of MATERIALS) Object.assign(mat, UNLOCKS[mat.id] ?? {});
 
 export const MATERIAL_BY_ID: ReadonlyMap<string, Material> = new Map(MATERIALS.map((x) => [x.id, x]));
 

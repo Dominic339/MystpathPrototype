@@ -86,6 +86,28 @@ export function buildHexResources(seed: number, terrain: Heightfield, biome: Uin
     }
     out.push({ q: h.q, r: h.r, env, ground, groundMax: { ...ground }, below });
   }
+  // Every world holds at least a little of everything its environments allow: rare
+  // materials that missed every roll get a few small deposits where they belong.
+  for (const layer of ['ground', 'below'] as const) {
+    const present = new Set(out.flatMap((h) => Object.keys(h[layer])));
+    const wanted = new Map<string, { env: EnvironmentId; abundance: number }[]>();
+    for (const h of out)
+      for (const [id, a] of Object.entries(ENVIRONMENT_BY_ID.get(h.env)![layer]))
+        if (!present.has(id)) {
+          if (!wanted.has(id)) wanted.set(id, []);
+          wanted.get(id)!.push({ env: h.env, abundance: a });
+        }
+    for (const [id] of wanted) {
+      const hosts = out.filter((h) => ENVIRONMENT_BY_ID.get(h.env)![layer][id] !== undefined);
+      for (let k = 0; k < Math.min(3, hosts.length); k++) {
+        const h = hosts[Math.floor(hash01(seed, k * 31 + id.length, id.charCodeAt(0)) * hosts.length)];
+        const scale = RARITY_SCALE[MATERIAL_BY_ID.get(id)?.rarity ?? 'common'];
+        const amount = Math.max(2, Math.round((layer === 'below' ? 60 : 12) * scale));
+        h[layer][id] = (h[layer][id] ?? 0) + amount;
+        if (layer === 'ground') h.groundMax[id] = h.ground[id];
+      }
+    }
+  }
   return out;
 }
 

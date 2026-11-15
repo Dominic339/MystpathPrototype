@@ -6,6 +6,7 @@
 import { DISCOVERIES, DISCOVERY_BY_ID, insightNeeded, type Discovery } from './data/discoveries';
 import { ERA_NAMES, ERAS, eraIndex, type EraId } from './data/eras';
 import { PASSION_JOBS, type JobId } from './data/jobs';
+import { MATERIAL_BY_ID } from './data/materials';
 import { calendar } from './time';
 import type { Villager, World } from './world';
 
@@ -26,6 +27,17 @@ export function currentEra(world: World): EraId {
 
 export function knows(world: World, id: string): boolean {
   return world.discoveries.includes(id);
+}
+
+/**
+ * Can the band recognise and work this material yet? Each material has an age (and the
+ * magical ones a discovery); a civilization can work materials up to one age ahead of its own.
+ */
+export function workable(world: World, id: string): boolean {
+  const m = MATERIAL_BY_ID.get(id);
+  if (!m) return true; // products are always fine
+  if (m.knowledge && !knows(world, m.knowledge)) return false;
+  return eraIndex(m.era) <= eraIndex(currentEra(world)) + 1;
 }
 
 /** Can this discovery be made right now (prerequisites, era reach and things seen)? */

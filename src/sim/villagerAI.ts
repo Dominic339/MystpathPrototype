@@ -15,7 +15,7 @@ import { FOODS } from './data/preservation';
 import { foodTotal } from './food';
 import { itemName, RECIPES, type Recipe } from './data/processing';
 import { FACILITY_BY_ID } from './data/facilities';
-import { currentEra, gainInsight, knows, logEvent, noteSeen } from './discovery';
+import { currentEra, gainInsight, knows, logEvent, noteSeen, workable } from './discovery';
 import { ROAD_TIERS } from './data/structures';
 import { bedFor, buildingWants, buildWork, lineOf, providedFacilities, tierOf, underConstruction, type Structure } from './town';
 import { hexToWorld } from './hex';
@@ -373,7 +373,7 @@ function chooseTarget(world: World, m: AcquisitionMethod, needs: Record<string, 
   const camp = world.camp.center;
   const value = (stockMap: Record<string, number>) => {
     let s = 0;
-    for (const id of Object.keys(m.yields)) if ((stockMap[id] ?? 0) >= 1) s += (needs[id] ?? 0.02) + 0.05;
+    for (const id of Object.keys(m.yields)) if ((stockMap[id] ?? 0) >= 1 && workable(world, id)) s += (needs[id] ?? 0.02) + 0.05;
     return s;
   };
   const consider = (score: number, make: () => Found | null) => {
@@ -948,6 +948,7 @@ const FARM_SEASON = [0.4, 0.9, 1.3, 0.05];
  */
 function facilityCycle(world: World, v: Villager, m: AcquisitionMethod, at: Structure): void {
   const take = (src: Record<string, number>, id: string, want: number) => {
+    if (!workable(world, id)) return 0;
     const n = Math.min(want, Math.floor(src[id] ?? 0));
     if (n <= 0) return 0;
     src[id] -= n;
@@ -1040,7 +1041,7 @@ function collect(world: World, v: Villager, m: AcquisitionMethod, target: Target
   let carried = 0;
   for (const [id, y] of Object.entries(m.yields)) {
     const have = src[id] ?? 0;
-    if (have < 1) continue;
+    if (have < 1 || !workable(world, id)) continue;
     // Fractional yields (rare finds) succeed by chance.
     let amount = y * (1 + lv * 0.03);
     amount = Math.floor(amount) + (world.rng.next() < amount % 1 ? 1 : 0);

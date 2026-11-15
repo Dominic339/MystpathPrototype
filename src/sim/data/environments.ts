@@ -46,7 +46,7 @@ const env = (id: EnvironmentId, name: string, d: Def): Environment => ({ id, nam
 export const ENVIRONMENTS: readonly Environment[] = [
   env('plains', 'Plains', {
     ground: { gravel: 0.3, stone: 0.15, 'meteoric-iron': 0.01 },
-    flora: { 'wild-grain': 0.8, 'wild-tubers': 0.4, 'wild-flax': 0.35, 'wild-hemp': 0.3, 'wild-herbs': 0.1, 'berry-bush': 0.15 },
+    flora: { 'wild-grain': 0.8, 'wild-tubers': 0.4, 'wild-flax': 0.35, 'wild-hemp': 0.3, 'wild-herbs': 0.1, 'berry-bush': 0.15, 'cork-oak': 0.06 },
     fauna: { aurochs: 0.4, 'red-deer': 0.3, hare: 0.6, 'nesting-birds': 0.1 },
     below: { stone: 0.4, clay: 0.3, phosphate: 0.15, 'crude-oil': 0.08, 'natural-gas': 0.06, coal: 0.12, 'iron-ore': 0.1 },
   }),
@@ -92,7 +92,7 @@ export const ENVIRONMENTS: readonly Environment[] = [
   }),
   env('chalk-hills', 'Chalk hills', {
     ground: { flint: 0.6, chalk: 0.4 },
-    flora: { 'wild-herbs': 0.2, thicket: 0.2 },
+    flora: { 'wild-herbs': 0.2, thicket: 0.2, 'cork-oak': 0.15 },
     fauna: { mouflon: 0.4, hare: 0.4 },
     below: { chalk: 0.9, limestone: 0.4, flint: 0.4 },
   }),

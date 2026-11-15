@@ -211,7 +211,7 @@ export const LINES: readonly Line[] = [
     t('modern', 'Electric arc works', ['electricity'], { 'iron-ingot': 40, 'copper-ingot': 20, electrodes: 6 }, 1800, 'arc-works', { speed: 7, workers: 8 }),
     t('techno-magic', 'Mana-arc foundry', ['arcane-engineering'], { 'mana-cell': 8, 'iron-ingot': 40 }, 1800, 'mana-arc', { speed: 10, workers: 6 }),
   ]),
-  line('mana-forge', 'Mana forge', 'processing', 'camp', 'arcanist', [t('iron', 'Mana forge', ['mana-smelting'], { 'cut-stone': 12, 'mana-crystal': 2 }, 700, 'mana-forge', { facilities: ['mana-forge'] })]),
+  line('mana-forge', 'Mana forge', 'processing', 'camp', 'arcanist', [t('medieval', 'Mana forge', ['mana-smelting'], { 'cut-stone': 12, 'mana-crystal': 2 }, 700, 'mana-forge', { facilities: ['mana-forge'] })]),
   line('glass', 'Glassmaking', 'processing', 'camp', 'glassblower', [
     t('iron', 'Glass furnace', ['glassmaking'], { bricks: 12, clay: 10 }, 600, 'glass-furnace', { facilities: ['glassworks'] }),
     t('industrial', 'Glassworks', ['factory-system'], { bricks: 40, 'iron-ingot': 8 }, 1000, 'glassworks', { speed: 4, workers: 6 }),

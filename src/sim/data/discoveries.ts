@@ -72,7 +72,7 @@ export const DISCOVERIES: readonly Discovery[] = [
   d('milling', 'Milling', 'iron', ['agriculture'], ['grain-farming', 'bake-flatbread'], 'Grinding grain into flour: quern houses and bakehouses.'),
   d('lime-burning', 'Lime burning', 'iron', ['pottery'], ['fire-pottery', 'cut-limestone'], 'Burning limestone and chalk into lime for mortar and plaster.'),
   d('glassmaking', 'Glassmaking', 'iron', ['pottery'], ['fire-pottery', 'fire-bricks'], 'Melting sand into glass.', ['sand']),
-  d('mana-smelting', 'Mana smelting', 'iron', ['iron-smelting'], ['mining', 'bloom-iron'], 'Mana crystals heat a forge hotter than charcoal ever could.', ['mana-crystal']),
+  d('mana-smelting', 'Mana smelting', 'medieval', ['iron-smelting', 'arcane-sight'], ['mining', 'bloom-iron'], 'Mana crystals heat a forge hotter than charcoal ever could.', ['mana-crystal']),
   d('ropemaking', 'Ropemaking', 'iron', ['weaving'], ['twist-sinew', 'weave-linen'], 'Laying long ropes on a ropewalk.'),
   d('dyeing', 'Dyeing', 'iron', ['weaving'], ['weave-linen', 'pick-wild-herbs'], 'Fixing colour into cloth.'),
   d('candle-making', 'Candle making', 'iron', [], ['render-fat'], 'Tallow and beeswax candles and soap.'),
@@ -97,9 +97,10 @@ export const DISCOVERIES: readonly Discovery[] = [
   d('blast-furnaces', 'Blast furnaces', 'medieval', ['iron-smelting'], ['bloom-iron', 'burn-charcoal'], 'Tall furnaces with bellows smelt far more iron.'),
   d('sailing', 'Sailing', 'medieval', ['plank-boats'], ['build-plank-boat', 'weave-canvas'], 'Canvas sails and keels: shipyards and harbours.'),
   d('cobbled-roads', 'Cobbled roads', 'medieval', ['gravel-roads', 'masonry'], ['cut-stone'], 'Roads paved with set stones.'),
-  d('sacred-groves', 'Sacred groves', 'medieval', [], ['forage', 'grove-tending'], 'Tending ancient groves for spirit wood.', ['spirit-wood']),
-  d('levitation', 'Levitation', 'medieval', ['mining'], ['mining', 'attune-mana'], 'Hover stone can be woken to lift weight against the ground.', ['hover-stone']),
-  d('cold-binding', 'Cold binding', 'medieval', [], ['collect-ice', 'attune-mana'], 'Frost shards can be bound into cores that stay cold for months.', ['frost-shard']),
+  d('arcane-sight', 'Arcane sight', 'medieval', [], ['mining', 'beachcomb', 'collect-stones', 'forage'], 'Some stones hum and some wood glows: the first who can see magic can find mana crystals, hover stone, ember stone, frost shards and spirit wood.'),
+  d('sacred-groves', 'Sacred groves', 'medieval', ['arcane-sight'], ['forage', 'grove-tending'], 'Tending ancient groves for spirit wood.', ['spirit-wood']),
+  d('levitation', 'Levitation', 'medieval', ['mining', 'arcane-sight'], ['mining', 'attune-mana'], 'Hover stone can be woken to lift weight against the ground.', ['hover-stone']),
+  d('cold-binding', 'Cold binding', 'medieval', ['arcane-sight'], ['collect-ice', 'attune-mana'], 'Frost shards can be bound into cores that stay cold for months.', ['frost-shard']),
   d('frost-box', 'Frost rooms', 'medieval', ['cold-binding'], ['bind-frost'], 'Rooms chilled by bound frost shards: food keeps almost indefinitely.'),
 
   // ======================================================== Renaissance

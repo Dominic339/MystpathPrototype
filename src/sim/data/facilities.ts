@@ -68,7 +68,7 @@ export const FACILITIES: readonly Facility[] = [
   f('coke-oven', 'Coke oven', 'processing', 'industrial', 'smelter', 1, 3),
   f('bloomery', 'Bloomery', 'processing', 'iron', 'smelter', 1, 2),
   f('smelter', 'Smelter', 'processing', 'iron', 'smelter', 1, 4),
-  f('mana-forge', 'Mana forge', 'processing', 'iron', 'arcanist', 1, 2),
+  f('mana-forge', 'Mana forge', 'processing', 'medieval', 'arcanist', 1, 2),
   f('glassworks', 'Glassworks', 'processing', 'iron', 'glassblower', 1, 3),
   f('tannery', 'Tannery', 'processing', 'stone', 'tanner', 1, 2),
   f('furrier', 'Furrier', 'processing', 'stone', 'tanner', 1, 2),

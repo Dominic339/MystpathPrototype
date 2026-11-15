@@ -6,7 +6,7 @@ import { ENVIRONMENT_BY_ID } from './data/environments';
 import { ERA_NAMES, ERAS, eraIndex } from './data/eras';
 import { FAUNA_BY_ID } from './data/fauna';
 import { FLORA_BY_ID } from './data/flora';
-import { closestDiscovery, currentEra, ERA_THRESHOLD, inspire, makeDiscovery } from './discovery';
+import { closestDiscovery, currentEra, ERA_THRESHOLD, inspire, makeDiscovery, workable } from './discovery';
 import { hexKey, worldToHex } from './hex';
 import { JOB_NAMES, type JobId } from './data/jobs';
 import { MATERIAL_BY_ID } from './data/materials';
@@ -135,6 +135,12 @@ let sentStructures = -1;
 let sentRoster = -1;
 let lastStructurePost = 0;
 
+/** What a material not yet understood looks like to the villagers. */
+function unknownName(id: string): string {
+  const c = MATERIAL_BY_ID.get(id)?.category;
+  return c === 'ore' ? 'Unidentified ore' : c === 'gem' ? 'Strange crystals' : c === 'magic' ? 'Something that hums faintly' : c === 'fuel-mineral' ? 'Unknown mineral' : 'Unfamiliar stone';
+}
+
 const summary = (m: Record<string, number>) =>
   Object.entries(m)
     .filter(([, q]) => q >= 1)
@@ -175,12 +181,12 @@ function hexInfo(w: World, q: number, r: number): FromSim & { type: 'hexInfo' } 
       environment: env?.name ?? h.env,
       water: env?.water ? itemName(env.water, MATERIAL_BY_ID) : null,
       ground: Object.keys(h.groundMax)
-        .map((id) => ({ name: itemName(id, MATERIAL_BY_ID), qty: Math.floor(h.ground[id] ?? 0), max: h.groundMax[id] }))
+        .map((id) => ({ name: workable(w, id) ? itemName(id, MATERIAL_BY_ID) : unknownName(id), qty: Math.floor(h.ground[id] ?? 0), max: h.groundMax[id] }))
         .sort((a, b) => b.max - a.max),
       plants: list(plants),
       animals: list(animals),
       below: Object.entries(h.below)
-        .map(([id, qty]) => ({ name: itemName(id, MATERIAL_BY_ID), qty }))
+        .map(([id, qty]) => ({ name: workable(w, id) ? itemName(id, MATERIAL_BY_ID) : unknownName(id), qty }))
         .sort((a, b) => b.qty - a.qty),
       buildings: w.structures.filter((s) => s.hex === key).map((s) => tierOf(s)?.name ?? lineOf(s).tiers[s.target].name + ' (being built)'),
     },
