@@ -13,7 +13,7 @@ const WOOD = color('#6b4a2e');
 const WOOD_DARK = color('#3a2718');
 const WOOD_INNER = color('#8a6440');
 
-function canoeGeometry(): THREE.BufferGeometry {
+export function canoeGeometry(): THREE.BufferGeometry {
   const L = 5.2;
   const B = 0.42;
   const D = 0.42;
@@ -111,12 +111,42 @@ function paddleGeometry(): THREE.BufferGeometry {
   return merge([part(shaft, WOOD), part(blade, WOOD_INNER), part(grip, WOOD_DARK)]);
 }
 
+export type BoatMode = 'paddle' | 'fish' | 'trawl';
+
 export interface BoatView {
   group: THREE.Group;
+  /** Where the simulation has the boat now, and what its crew is doing. */
+  setTarget: (x: number, z: number, mode: BoatMode) => void;
   update: (dt: number, time: number) => void;
 }
 
-export function buildBoat(water: WaterSystem, route: [number, number][]): BoatView {
+/** A net trailing from the stern: a rope with floats and a dark mesh sinking behind. */
+function netGeometry(): THREE.BufferGeometry {
+  const parts: THREE.BufferGeometry[] = [];
+  const rope = color('#5a4a34');
+  for (const side of [-1, 1]) {
+    const pts: THREE.Vector3[] = [];
+    for (let k = 0; k <= 8; k++) {
+      const t = k / 8;
+      pts.push(new THREE.Vector3(-1.6 - t * 5, -0.15 - t * 0.12, side * (0.2 + Math.sin(t * Math.PI) * 1.4)));
+    }
+    const curve = new THREE.CatmullRomCurve3(pts);
+    parts.push(part(new THREE.TubeGeometry(curve, 16, 0.015, 4), rope));
+    for (let k = 1; k <= 8; k += 1.5) {
+      const f = new THREE.SphereGeometry(0.07, 6, 4);
+      const p = curve.getPoint(k / 8);
+      f.translate(p.x, -0.12, p.z);
+      parts.push(part(f, color('#d9b04a')));
+    }
+  }
+  const mesh = new THREE.PlaneGeometry(5, 2.6, 8, 4);
+  mesh.rotateX(-Math.PI / 2);
+  mesh.translate(-4.1, -0.35, 0);
+  parts.push(part(mesh, (p) => (Math.abs(Math.sin(p.x * 14)) < 0.3 || Math.abs(Math.sin(p.z * 14)) < 0.3 ? color('#2e2a22') : color('#3c4a46'))));
+  return merge(parts);
+}
+
+export function buildBoat(water: WaterSystem, look = 3, seed = 11, start: [number, number] = [0, 0]): BoatView {
   const group = new THREE.Group();
   group.name = 'canoe';
   const canoe = new THREE.Mesh(canoeGeometry(), natureMaterial({ roughness: 0.85 }));
@@ -131,7 +161,7 @@ export function buildBoat(water: WaterSystem, route: [number, number][]): BoatVi
   canoe.add(mask);
 
   // Paddler kneeling mid-boat, with a paddle held in both hands.
-  const paddler: Figure = makeFigure(3, 11);
+  const paddler: Figure = makeFigure(look, seed);
   paddler.root.rotation.y = Math.PI / 2; // face the bow (+X)
   paddler.root.position.set(-0.3, -0.42, 0);
   group.add(paddler.root);
@@ -141,11 +171,21 @@ export function buildBoat(water: WaterSystem, route: [number, number][]): BoatVi
   paddle.add(paddleMesh);
   group.add(paddle);
 
-  let index = 0;
-  let dirStep = 1;
-  let x = route[0][0];
-  let z = route[0][1];
-  let heading = Math.atan2(route[1][1] - z, route[1][0] - x);
+  // A net (shown when trawling) and a fishing line (when fishing).
+  const net = new THREE.Mesh(netGeometry(), natureMaterial({ roughness: 0.9, side: THREE.DoubleSide }));
+  net.visible = false;
+  canoe.add(net);
+  const lineGeo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0.3, 0.9, 0.5), new THREE.Vector3(1.6, -0.3, 1.4)]);
+  const line = new THREE.Line(lineGeo, new THREE.LineBasicMaterial({ color: '#d8d0b8' }));
+  line.visible = false;
+  canoe.add(line);
+
+  let x = start[0];
+  let z = start[1];
+  let heading = 0;
+  let tx = x;
+  let tz = z;
+  let mode: BoatMode = 'paddle';
   const vel = new THREE.Vector2();
   let wakeTimer = 0;
   let strokePhase = 0;
@@ -162,14 +202,23 @@ export function buildBoat(water: WaterSystem, route: [number, number][]): BoatVi
 
   return {
     group,
-    update(dt, time) {
-      // Steer toward the next route point; ping-pong along the route.
-      const [tx, tz] = route[index];
-      if (Math.hypot(tx - x, tz - z) < 7) {
-        if (index + dirStep < 0 || index + dirStep >= route.length) dirStep = -dirStep;
-        index += dirStep;
+    setTarget(nx, nz, m) {
+      tx = nx;
+      tz = nz;
+      mode = m;
+      // Far off (just launched, or the view was reset): jump there.
+      if (Math.hypot(tx - x, tz - z) > 25) {
+        x = tx;
+        z = tz;
+        vel.set(0, 0);
       }
-      let want = Math.atan2(tz - z, tx - x);
+    },
+    update(dt, time) {
+      // Follow the simulation's position: paddle toward it, slowing on arrival.
+      const dist = Math.hypot(tx - x, tz - z);
+      let want = dist > 0.8 ? Math.atan2(tz - z, tx - x) : heading;
+      net.visible = mode === 'trawl';
+      line.visible = mode === 'fish';
       // Keep off the banks: turn gently toward whichever side ahead is deeper.
       const look = 6;
       const dl = water.depthAt(x + Math.cos(heading + 0.45) * look, z + Math.sin(heading + 0.45) * look);
@@ -182,7 +231,7 @@ export function buildBoat(water: WaterSystem, route: [number, number][]): BoatVi
 
       // Paddling thrust plus the river current, with water drag.
       const flow = water.flowAt(x, z);
-      const thrust = 1.5;
+      const thrust = (mode === 'fish' ? 0 : mode === 'trawl' ? 0.6 : 1.7) * THREE.MathUtils.clamp(dist / 3, mode === 'trawl' ? 0.5 : 0, 1);
       vel.x += (Math.cos(heading) * thrust + flow.x - vel.x) * Math.min(1, dt * 0.8);
       vel.y += (Math.sin(heading) * thrust + flow.z - vel.y) * Math.min(1, dt * 0.8);
       const nx = x + vel.x * dt;
@@ -230,7 +279,17 @@ export function buildBoat(water: WaterSystem, route: [number, number][]): BoatVi
       // Paddle stroke: a smooth pull (blade in the water, sweeping back) and a feathered
       // recovery. The paddler switches sides every few strokes with an arc over the boat.
       const ease = (t: number) => t * t * (3 - 2 * t);
-      strokePhase += dt * 0.7;
+      // Fishing with a line: paddle laid across the boat, arms out holding the line.
+      if (thrust < 0.05) {
+        paddle.position.set(-0.3, 0.12, 0);
+        paddle.rotation.set(Math.PI / 2, 0, 0.1);
+        pose(paddler, { tl: 1.45, tr: 1.45, kl: 0.25, kr: 0.25, sl: 0.9, sr: 1.1, el: 0.5, er: 0.4, spine: 0.15 + Math.sin(time * 0.8) * 0.03 });
+        paddler.hips.position.y = 0.22;
+        paddler.spine.rotation.y = 0.5;
+        paddler.spine.rotation.z = 0;
+        return;
+      }
+      strokePhase += dt * (mode === 'trawl' ? 0.4 : 0.7);
       if (strokePhase >= 1) {
         strokePhase -= 1;
         strokeCount++;

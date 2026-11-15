@@ -9,6 +9,7 @@
 import * as THREE from 'three';
 import { hash01 } from '../sim/rng';
 import { color, jitter, limb, merge, mix, noise3, part } from './geom';
+import { tentGeometry } from './camp';
 import { rockShape } from './materials';
 
 const V = (x: number, y: number, z: number) => new THREE.Vector3(x, y, z);
@@ -95,65 +96,180 @@ function roofColor(s: TownStyle) {
   };
 }
 
-/** A round daub (or wattle, or log) wall with a doorway gap facing +z. */
-function roundWall(r: number, h: number, s: TownStyle, door = 0.55): G[] {
+/** The camp's palette, so new buildings belong with the hide tents. */
+const POLE = color('#6b5137');
+const POLE_DARK = color('#3f2e20');
+const BAND = color('#8a2f22');
+const LASHING = color('#3a2a1a');
+const poleColor = (p: THREE.Vector3) => mix(POLE_DARK, POLE, noise3(p.x * 4, p.y * 2, p.z * 4) * 0.5 + 0.6);
+
+/** A pole with a little taper, in the tents' wood. */
+function pole(a: THREE.Vector3, b: THREE.Vector3, r = 0.06): G {
+  return part(limb(a, b, r, r * 0.7, 5), poleColor);
+}
+
+/** A ring of lashing around a pole or bundle. */
+function lashing(at: THREE.Vector3, r: number, axis: 'x' | 'y' | 'z' = 'y'): G {
+  const g = new THREE.TorusGeometry(r, 0.025, 4, 10);
+  if (axis === 'y') g.rotateX(Math.PI / 2);
+  if (axis === 'x') g.rotateY(Math.PI / 2);
+  g.translate(at.x, at.y, at.z);
+  return part(g, LASHING);
+}
+
+/**
+ * A round wall like a real roundhouse: a ring of upright stakes with wattle woven between
+ * them (daubed with clay, or left bare, or logs), a footing of stones, a painted band to
+ * match the tents, and a doorway facing +z with a hide flap tied back.
+ */
+function roundWall(r: number, h: number, s: TownStyle, seed: number, door = 0.62): G[] {
   const half = door / 2;
   // Cylinder angles start at +z, so the gap left between the end and the start faces +z.
-  const g = new THREE.CylinderGeometry(r, r * 1.03, h, 22, 3, true, half, Math.PI * 2 - door);
-  g.translate(0, h / 2, 0);
-  const parts = [part(g, wallColor(s))];
-  // Door posts and lintel.
-  for (const sgn of [-1, 1]) {
-    const a = half * sgn;
-    const x = Math.sin(a) * r;
-    const z = Math.cos(a) * r;
-    parts.push(part(limb(V(x, -0.1, z), V(x, h * 0.95, z), 0.07, 0.06, 5), s.wood));
-  }
-  const ax = Math.sin(half) * r;
-  const az = Math.cos(half) * r;
-  parts.push(part(limb(V(ax, h * 0.92, az), V(-ax, h * 0.92, az), 0.06, 0.06, 5), s.wood));
-  return parts;
-}
-
-/** A shaggy conical roof. */
-function coneRoof(r: number, h: number, base: number, s: TownStyle, seed: number): G[] {
-  const g = new THREE.ConeGeometry(r, h, 26, 6, true);
+  const g = new THREE.CylinderGeometry(r, r * 1.03, h, 28, 4, true, half, Math.PI * 2 - door);
+  // Slight unevenness, as if hand-plastered.
   const pos = g.getAttribute('position');
   for (let i = 0; i < pos.count; i++) {
-    const y = pos.getY(i);
     const x = pos.getX(i);
     const z = pos.getZ(i);
-    const edge = y < -h / 2 + 0.01;
-    const shag = edge ? 1 + (noise3(x * 4 + seed, 0, z * 4) - 0.2) * 0.12 : 1 + noise3(x * 2, y * 2, z * 2) * 0.03;
-    pos.setX(i, x * shag);
-    pos.setZ(i, z * shag);
-    if (edge) pos.setY(i, y - Math.abs(noise3(x * 5, seed, z * 5)) * 0.15);
+    const k = 1 + noise3(x * 1.7 + seed, pos.getY(i) * 2, z * 1.7) * 0.025;
+    pos.setX(i, x * k);
+    pos.setZ(i, z * k);
   }
   g.computeVertexNormals();
-  g.translate(0, base + h / 2, 0);
-  const parts = [part(g, roofColor(s))];
-  // A smoke-dark cap at the apex.
-  const cap = new THREE.ConeGeometry(r * 0.16, h * 0.16, 12, 1, true);
-  cap.translate(0, base + h - h * 0.08 + 0.02, 0);
-  parts.push(part(cap, s.roofDark.clone().multiplyScalar(0.6)));
+  g.translate(0, h / 2, 0);
+  const wall = wallColor(s);
+  const parts = [
+    part(g, (p) => {
+      const c = wall(p);
+      // The painted band the tents carry.
+      if (p.y > h * 0.55 && p.y < h * 0.66) return mix(c, BAND, 0.7);
+      return c;
+    }),
+  ];
+  // Upright stakes every so often, standing a little proud of the wall top.
+  const stakes = Math.round(r * 5.5);
+  for (let k = 0; k <= stakes; k++) {
+    const a = half + (k / stakes) * (Math.PI * 2 - door);
+    const x = Math.sin(a) * (r + 0.04);
+    const z = Math.cos(a) * (r + 0.04);
+    parts.push(pole(V(x, -0.1, z), V(x, h + 0.12, z), 0.055));
+  }
+  // Stone footing.
+  for (let k = 0; k < Math.round(r * 9); k++) {
+    const a = half + (k / Math.round(r * 9)) * (Math.PI * 2 - door);
+    const st = rockShape(0.17 + hash01(seed, k, 3) * 0.08, seed * 31 + k);
+    st.scale(1.3, 0.7, 1);
+    st.translate(Math.sin(a) * (r + 0.08), 0.06, Math.cos(a) * (r + 0.08));
+    parts.push(part(st, (p) => jitter(s.stone, 0.12, p.x * 5, p.y * 5, p.z * 5)));
+  }
+  // Doorway: posts, lintel, a threshold stone and the hide flap tied back.
+  const dx = Math.sin(half) * r;
+  const dz = Math.cos(half) * r;
+  for (const sgn of [-1, 1]) parts.push(pole(V(sgn * dx, -0.1, dz), V(sgn * dx, h * 0.97, dz), 0.08));
+  parts.push(pole(V(dx + 0.15, h * 0.93, dz), V(-dx - 0.15, h * 0.93, dz), 0.07));
+  const sill = new THREE.BoxGeometry(dx * 2.2, 0.12, 0.5);
+  sill.translate(0, 0.04, dz + 0.15);
+  parts.push(part(sill, (p) => jitter(s.stone, 0.1, p.x * 4, 0, p.z * 4)));
+  const flap = new THREE.PlaneGeometry(0.55, h * 0.85, 2, 3);
+  flap.translate(0.28, h * 0.45, 0);
+  flap.rotateY(-0.9);
+  flap.translate(dx, 0, dz + 0.04);
+  parts.push(part(flap, (p) => jitter(mix(color('#7d5b3c'), color('#b08a62'), p.y / h), 0.08, p.x * 6, p.y * 6, p.z * 6)));
   return parts;
 }
 
-/** A pitched roof along x (ridge along x), eaves at height `base`. */
+/**
+ * A thatched (or reed, turf or bark) cone laid in overlapping courses with ragged edges,
+ * rafter ends showing under the eaves and, like the tents, poles crossing above the smoke hole.
+ */
+function coneRoof(r: number, h: number, base: number, s: TownStyle, seed: number): G[] {
+  const parts: G[] = [];
+  const courses = s.roofKind === 'turf' || s.roofKind === 'bark' ? 2 : 3;
+  const col = roofColor(s);
+  for (let c = 0; c < courses; c++) {
+    // Each course covers the top of the one below it.
+    const t0 = c / courses;
+    const t1 = Math.min(1, (c + 1.25) / courses);
+    const rBot = r * (1 - t0 * 0.96);
+    const rTop = r * (1 - t1 * 0.96);
+    const y0 = base + t0 * h;
+    const y1 = base + t1 * h;
+    const g = new THREE.CylinderGeometry(rTop, rBot, y1 - y0, 30, 3, true);
+    const pos = g.getAttribute('position');
+    const half = (y1 - y0) / 2;
+    for (let i = 0; i < pos.count; i++) {
+      const x = pos.getX(i);
+      const y = pos.getY(i);
+      const z = pos.getZ(i);
+      const lower = (half - y) / (2 * half); // 1 at the bottom edge
+      const bulge = 1 + lower * 0.06 + noise3(x * 2.2 + c, y * 3, z * 2.2) * 0.03;
+      pos.setX(i, x * bulge);
+      pos.setZ(i, z * bulge);
+      // Ragged, uneven bottom edge.
+      if (lower > 0.99) pos.setY(i, y - Math.abs(noise3(x * 5 + seed + c * 7, 0, z * 5)) * 0.22 - 0.04);
+    }
+    g.computeVertexNormals();
+    g.translate(0, (y0 + y1) / 2, 0);
+    parts.push(
+      part(g, (p) => {
+        const k = (p.y - y0) / (y1 - y0);
+        // Darker, weathered underside at each course's edge.
+        return mix(col(p), s.roofDark, Math.max(0, 0.25 - k) * 2.2);
+      }),
+    );
+  }
+  // Rafter ends under the eaves.
+  const rafters = Math.round(r * 6);
+  for (let k = 0; k < rafters; k++) {
+    const a = (k / rafters) * Math.PI * 2 + 0.1;
+    parts.push(pole(V(Math.sin(a) * r * 0.78, base + h * 0.2, Math.cos(a) * r * 0.78), V(Math.sin(a) * r * 1.02, base - 0.06, Math.cos(a) * r * 1.02), 0.045));
+  }
+  // Smoke-blackened apex with poles crossing above it.
+  const cap = new THREE.CylinderGeometry(r * 0.05, r * 0.12, h * 0.1, 12, 1, true);
+  cap.translate(0, base + h * 0.97, 0);
+  parts.push(part(cap, s.roofDark.clone().multiplyScalar(0.45)));
+  for (let k = 0; k < 5; k++) {
+    const a = (k / 5) * Math.PI * 2 + seed;
+    parts.push(pole(V(Math.cos(a) * r * 0.2, base + h * 0.8, Math.sin(a) * r * 0.2), V(-Math.cos(a) * 0.3, base + h + 0.75, -Math.sin(a) * 0.3), 0.045));
+  }
+  return parts;
+}
+
+/** A pitched roof along x (ridge along x), eaves at height `base`, laid in courses. */
 function gableRoof(w: number, d: number, rise: number, base: number, s: TownStyle): G[] {
   const parts: G[] = [];
   const slope = Math.hypot(d / 2, rise);
   const ang = Math.atan2(rise, d / 2);
+  const col = roofColor(s);
   for (const sgn of [-1, 1]) {
-    const g = new THREE.BoxGeometry(w + 0.5, 0.2, slope + 0.35, 6, 1, 4);
-    g.rotateX(sgn * ang);
-    g.translate(0, base + rise / 2, (sgn * d) / 4);
-    parts.push(part(g, roofColor(s)));
+    // Two overlapping courses per side with a ragged lower edge.
+    for (let c = 0; c < 2; c++) {
+      const len = slope * (c === 0 ? 0.62 : 0.6) + 0.25;
+      const g = new THREE.BoxGeometry(w + 0.5, 0.22, len, Math.ceil(w * 2), 1, 3);
+      const pos = g.getAttribute('position');
+      // Ragged edge at the eaves end (+z on one side, -z on the other once rotated).
+      for (let i = 0; i < pos.count; i++) {
+        const z = pos.getZ(i) * sgn;
+        if (z > len / 2 - 0.01) pos.setZ(i, pos.getZ(i) + sgn * Math.abs(noise3(pos.getX(i) * 4 + c, sgn, 0)) * 0.25);
+      }
+      g.computeVertexNormals();
+      // Place along the slope: course 0 at the eaves, course 1 up to the ridge.
+      const along = c === 0 ? slope * 0.72 : slope * 0.3;
+      g.translate(0, c * 0.05, sgn * (along - slope / 2));
+      g.rotateX(sgn * ang);
+      g.translate(0, base + rise / 2, (sgn * d) / 4);
+      parts.push(part(g, (p) => mix(col(p), s.roofDark, c === 0 ? 0.08 : 0)));
+    }
   }
-  const ridge = new THREE.CylinderGeometry(0.14, 0.14, w + 0.6, 6);
+  // Ridge bundle, lashed.
+  const ridge = new THREE.CylinderGeometry(0.17, 0.17, w + 0.6, 7);
   ridge.rotateZ(Math.PI / 2);
-  ridge.translate(0, base + rise + 0.05, 0);
+  ridge.translate(0, base + rise + 0.08, 0);
   parts.push(part(ridge, s.roofDark));
+  for (let k = -2; k <= 2; k++) parts.push(lashing(V((k * w) / 5, base + rise + 0.08, 0), 0.18, 'x'));
+  // Crossed rafters standing proud at both gable ends, like the tents' poles.
+  for (const ex of [-w / 2 - 0.25, w / 2 + 0.25])
+    for (const sgn of [-1, 1]) parts.push(pole(V(ex, base - 0.1, (sgn * d) / 2), V(ex, base + rise + 0.55, (-sgn * d) / 6), 0.05));
   return parts;
 }
 
@@ -188,13 +304,50 @@ function boxWalls(w: number, d: number, h: number, s: TownStyle, doorW = 1): G[]
   wall(side, t, w / 2 - side / 2, d / 2);
   // Corner posts and door frame.
   for (const [x, z] of [[-w / 2, -d / 2], [w / 2, -d / 2], [-w / 2, d / 2], [w / 2, d / 2], [-doorW / 2, d / 2], [doorW / 2, d / 2]])
-    parts.push(part(limb(V(x, -0.1, z), V(x, h, z), 0.09, 0.08, 5), s.wood));
+    parts.push(pole(V(x, -0.1, z), V(x, h + 0.05, z), 0.09));
+  // Painted band and a footing of stones, as on the roundhouses.
+  for (const [bw, bd, bx, bz] of [[w, 0.02, 0, d / 2 + 0.1], [w, 0.02, 0, -d / 2 - 0.1], [0.02, d, w / 2 + 0.1, 0], [0.02, d, -w / 2 - 0.1, 0]]) {
+    const b = new THREE.BoxGeometry(bw, h * 0.1, bd);
+    b.translate(bx, h * 0.6, bz);
+    if (bz > 0) continue; // keep the door side clear
+    parts.push(part(b, BAND));
+  }
+  for (let k = 0; k < Math.round((w + d) * 3); k++) {
+    const t = k / Math.round((w + d) * 3);
+    const per = t * 2 * (w + d);
+    let x: number;
+    let z: number;
+    if (per < w) [x, z] = [-w / 2 + per, -d / 2 - 0.1];
+    else if (per < w + d) [x, z] = [w / 2 + 0.1, -d / 2 + per - w];
+    else if (per < 2 * w + d) [x, z] = [w / 2 - (per - w - d), d / 2 + 0.1];
+    else [x, z] = [-w / 2 - 0.1, d / 2 - (per - 2 * w - d)];
+    const st = rockShape(0.16, k * 13 + Math.round(w * 10));
+    st.scale(1.3, 0.7, 1);
+    st.translate(x, 0.05, z);
+    parts.push(part(st, (p) => jitter(s.stone, 0.12, p.x * 5, p.y * 5, p.z * 5)));
+  }
   return parts;
 }
 
-/** Posts holding up a roof, for open sheds. */
+/** Forked posts holding up a roof, for open sheds, lashed at the fork. */
 function posts(w: number, d: number, h: number, s: TownStyle): G[] {
-  return [[-w / 2, -d / 2], [w / 2, -d / 2], [-w / 2, d / 2], [w / 2, d / 2]].map(([x, z]) => part(limb(V(x, -0.1, z), V(x, h, z), 0.1, 0.09, 6), s.wood));
+  const parts: G[] = [];
+  void s;
+  for (const [x, z] of [[-w / 2, -d / 2], [w / 2, -d / 2], [-w / 2, d / 2], [w / 2, d / 2]]) {
+    parts.push(pole(V(x, -0.15, z), V(x, h - 0.15, z), 0.1));
+    for (const sgn of [-1, 1]) parts.push(pole(V(x, h - 0.2, z), V(x + sgn * 0.14, h + 0.12, z), 0.05));
+    parts.push(lashing(V(x, h - 0.2, z), 0.1));
+  }
+  // Wall plates along the long sides.
+  for (const z of [-d / 2, d / 2]) parts.push(pole(V(-w / 2 - 0.2, h, z), V(w / 2 + 0.2, h, z), 0.07));
+  return parts;
+}
+
+/** A woven basket. */
+function basket(x: number, z: number, s: TownStyle, r = 0.28): G {
+  const g = new THREE.CylinderGeometry(r, r * 0.8, r * 1.3, 12, 3, true);
+  g.translate(x, r * 0.65, z);
+  return part(g, (p) => mix(s.roofDark, s.roof, Math.abs(Math.sin(p.y * 30 + Math.atan2(p.z - z, p.x - x) * 4)) * 0.6));
 }
 
 function logPile(n: number, len: number, x: number, z: number, rot = 0): G[] {
@@ -372,7 +525,7 @@ function pennant(x: number, z: number, h: number, s: TownStyle): G[] {
 type Model = (s: TownStyle, v: number) => G;
 
 function hut(s: TownStyle, r: number, wallH: number, roofH: number, seed: number, porch = false): G[] {
-  const parts = [...roundWall(r, wallH, s), ...coneRoof(r * 1.2, roofH, wallH - 0.1, s, seed)];
+  const parts = [...roundWall(r, wallH, s, seed), ...coneRoof(r * 1.22, roofH, wallH - 0.08, s, seed)];
   if (porch) {
     // A small porch roof over the door.
     const g = new THREE.BoxGeometry(1.4, 0.12, 1.1);
@@ -385,10 +538,12 @@ function hut(s: TownStyle, r: number, wallH: number, roofH: number, seed: number
 }
 
 const MODELS: Record<string, Model> = {
+  tent: (_s, v) => tentGeometry(v),
   roundhouse: (s, v) => {
-    const r = 2.7 + (v % 2) * 0.4;
-    const parts = hut(s, r, 1.7, 2.9 + (v % 3) * 0.2, v, v % 2 === 0);
-    parts.push(...logPile(5, 1.4, r + 0.8, -0.8, 0.3));
+    // About the tents' footprint and height, so the town reads at one scale.
+    const r = 2.5 + (v % 2) * 0.3;
+    const parts = hut(s, r, 1.8, 2.7 + (v % 3) * 0.15, v, v % 2 === 0);
+    parts.push(...logPile(5, 1.4, r + 0.8, -0.8, 0.3), basket(r * 0.55, r + 0.7, s), basket(r * 0.55 + 0.5, r + 0.5, s, 0.22));
     if (v % 2) parts.push(...pots(2, -r - 0.5, 0.8, v));
     if (v === 3) parts.push(...frame(-r - 0.8, -1, 0.6, s, HIDE));
     return merge(parts);
@@ -404,7 +559,7 @@ const MODELS: Record<string, Model> = {
     const oven = new THREE.SphereGeometry(0.7, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2);
     oven.translate(2.4, 0, 2);
     parts.push(part(oven, (p) => jitter(color('#a0704a'), 0.1, p.x * 4, p.y * 4, p.z * 4)));
-    parts.push(...pots(4, -2.8, 1.2, v), ...logPile(3, 1.1, 3.2, -0.6, 0.8));
+    parts.push(...pots(4, -2.8, 1.2, v), ...logPile(3, 1.1, 3.2, -0.6, 0.8), basket(-1.2, 3, s));
     return merge(parts);
   },
   'herbalist-hut': (s, v) => {

@@ -14,7 +14,7 @@ const HIDE = color('#b08a62');
 const HIDE_DARK = color('#7d5b3c');
 const HIDE_LIGHT = color('#d1b48a');
 
-function tentGeometry(seed: number): THREE.BufferGeometry {
+export function tentGeometry(seed: number): THREE.BufferGeometry {
   const parts: THREE.BufferGeometry[] = [];
   const radius = 2.4;
   const height = 4.3;
@@ -208,7 +208,7 @@ export function buildCamp(camp: CampLayout, terrain: Heightfield): CampBuild {
     group.add(m);
     return m;
   };
-  camp.tents.forEach((t, i) => place(tentGeometry(i), t));
+  // Tents are homes now: the town draws them (and replaces them as homes are upgraded).
   const rack = rackGeometry();
   place(rack.frame, camp.rack);
   const hideMesh = new THREE.Mesh(rack.hides, natureMaterial({ roughness: 0.95, side: THREE.DoubleSide }));

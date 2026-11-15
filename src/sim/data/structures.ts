@@ -69,6 +69,7 @@ const SHED = { softwood: 10, hardwood: 4, reeds: 8 };
 export const LINES: readonly Line[] = [
   // ---------------------------------------------------------------- Housing
   line('housing', 'Homes', 'housing', 'camp', 'builder', [
+    t('hunter-gatherer', 'Hide tent', [], { hides: 4, softwood: 6, cordage: 1 }, 200, 'tent', { housing: 2 }),
     t('stone', 'Roundhouse', ['wattle-and-daub'], { softwood: 10, reeds: 14, clay: 8 }, 500, 'roundhouse', { housing: 4 }),
     t('iron', 'Timber longhouse', ['timber-framing'], { lumber: 16, reeds: 20, 'cut-stone': 6 }, 900, 'longhouse', { housing: 8 }),
     t('medieval', 'Timber-framed cottage', ['masonry'], { planks: 20, 'cut-stone': 10, plaster: 6 }, 900, 'cottage', { housing: 6 }),

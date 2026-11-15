@@ -14,7 +14,7 @@ import { MATERIAL_BY_ID } from './data/materials';
 import { RECIPES } from './data/processing';
 import { LINE_BY_ID, LINES, ROAD_TIERS, facilitiesAt, type Line, type Site, type Tier } from './data/structures';
 import { currentEra, knows, logEvent } from './discovery';
-import { HEX_SIZE, hexKey, hexToWorld } from './hex';
+import { HEX_SIZE, hexKey, hexToWorld, worldToHex as worldToHexLocal } from './hex';
 import { calendar } from './time';
 import type { Villager, World } from './world';
 
@@ -55,7 +55,8 @@ export interface Structure {
   plannedAt: number;
 }
 
-const MAX_SITES = 2;
+/** Building sites at once: more hands, more sites. */
+const maxSites = (world: World) => 2 + Math.floor(world.villagers.length / 8);
 const PLAN_EVERY = 20;
 
 export function lineOf(s: Structure): Line {
@@ -94,7 +95,7 @@ export function providedFacilities(world: World): Map<string, Structure[]> {
 }
 
 export function housingCapacity(world: World): number {
-  let cap = world.camp.tents.length * 2;
+  let cap = 0;
   for (const s of world.structures) {
     const t = tierOf(s);
     if (t?.housing) cap += t.housing;
@@ -168,7 +169,6 @@ function clearAt(world: World, x: number, z: number, r: number, ignore?: Structu
   }
   const c = world.camp;
   if (Math.hypot(c.fire.x - x, c.fire.z - z) < 8 + r) return false;
-  for (const tent of c.tents) if (Math.hypot(tent.x - x, tent.z - z) < 3 + r) return false;
   for (const p of world.props) {
     if (p.kind === 'flowers' || p.kind === 'grain' || p.kind === 'tubers' || p.kind === 'flax' || p.kind === 'mushrooms' || p.kind === 'nest') continue;
     const pr = p.kind === 'oak' || p.kind === 'pine' || p.kind === 'birch' || p.kind === 'apple' ? 1.8 : p.kind === 'boulder' ? 2.2 : 1;
@@ -187,7 +187,8 @@ export function findSite(world: World, l: Line, model: string): { x: number; z: 
     if (s <= 0) continue;
     const c = hexToWorld(world.hexes[i]);
     const d = Math.hypot(c.x - camp.x, c.z - camp.z);
-    const maxD = l.site === 'camp' ? 60 : 125;
+    // The town spreads outward as it grows.
+    const maxD = l.site === 'camp' ? 50 + world.villagers.length * 1.5 : 125 + world.villagers.length;
     if (d > maxD) continue;
     ranked.push({ i, score: s / (1 + d / (l.site === 'camp' ? 15 : 40)) });
   }
@@ -311,17 +312,20 @@ export function planTown(world: World, needs: Record<string, number>, dt: number
   if (world.planTimer > 0) return;
   world.planTimer = PLAN_EVERY;
   const sites = world.structures.filter(underConstruction).length;
-  if (sites >= MAX_SITES) return;
+  if (sites >= maxSites(world)) return;
 
   // 1. Homes when the band is crowded.
   const housing = LINE_BY_ID.get('housing')!;
   const homeTier = bestTier(world, housing);
-  if (homeTier >= 0 && canSupply(world, housing.tiers[homeTier]) && world.villagers.length >= housingCapacity(world) - 1 && !world.structures.some((s) => s.line === 'housing' && underConstruction(s))) {
+  // Build ahead of need so newcomers have somewhere to sleep.
+  const homesGoingUp = world.structures.filter((s) => s.line === 'housing' && underConstruction(s) && s.tier < 0).length;
+  if (homeTier >= 0 && canSupply(world, housing.tiers[homeTier]) && world.villagers.length >= housingCapacity(world) - 2 && homesGoingUp < 1 + Math.floor(world.villagers.length / 15)) {
     if (place(world, housing, homeTier)) return;
   }
 
-  // 2. Upgrades in place when a better tier is known.
-  for (const s of world.structures) {
+  // 2. Upgrades in place when a better tier is known: homes first (they drive happiness).
+  const order = [...world.structures].sort((a, b) => (a.line === 'housing' ? 0 : 1) - (b.line === 'housing' ? 0 : 1) || a.tier - b.tier);
+  for (const s of order) {
     if (underConstruction(s)) continue;
     const best = bestTier(world, lineOf(s));
     if (best > s.tier && canSupply(world, lineOf(s).tiers[s.tier + 1])) {
@@ -334,20 +338,35 @@ export function planTown(world: World, needs: Record<string, number>, dt: number
     }
   }
 
-  // 3. New buildings: the most useful line the town has none of yet.
+  // 3. New buildings: the most useful line the town has none of yet, or another of a
+  //    busy one when more people want that work than it has places for.
   let pick: Line | null = null;
   let pickScore = 0;
   for (const l of LINES) {
     if (l.kind === 'housing') continue;
-    if (world.structures.some((s) => s.line === l.id)) continue;
     if (bestTier(world, l) < 0 || !canSupply(world, l.tiers[0])) continue;
-    const u = usefulness(world, l, needs);
+    const have = world.structures.filter((s) => s.line === l.id);
+    let u: number;
+    if (!have.length) u = usefulness(world, l, needs);
+    else {
+      if (l.kind !== 'acquisition' && l.kind !== 'processing') continue;
+      if (have.some(underConstruction) || have.length >= 1 + Math.floor(world.villagers.length / 10)) continue;
+      const places = have.reduce((n, s) => n + (tierOf(s)?.workers ?? 0), 0);
+      const keen = world.villagers.filter((v) => PASSION_JOBS[v.passion].includes(l.job) || v.job === l.job).length;
+      const wanted = l.tiers[0].facilities.some((f) => facilityOutputs(f).some((id) => (needs[id] ?? 0) > 0.6));
+      if (keen + (wanted ? 2 : 0) <= places) continue;
+      u = 0.45 + Math.min(0.3, (keen - places) * 0.1);
+    }
     if (u > pickScore) {
       pickScore = u;
       pick = l;
     }
   }
-  if (pick) place(world, pick, 0);
+  if (pick) {
+    // A second building of a line starts at the best tier the town knows.
+    const tier = world.structures.some((s) => s.line === pick!.id) ? Math.max(0, bestTier(world, pick)) : 0;
+    place(world, pick, tier);
+  }
 }
 
 function place(world: World, l: Line, tier: number): boolean {
@@ -356,7 +375,7 @@ function place(world: World, l: Line, tier: number): boolean {
   if (!site) return false;
   // A new building goes up at the first tier, then upgrades.
   const s: Structure = {
-    id: world.nextStructureId++, line: l.id, tier: -1, target: 0, progress: 0, supplied: false,
+    id: world.nextStructureId++, line: l.id, tier: -1, target: tier, progress: 0, supplied: false,
     x: site.x, z: site.z, rot: site.rot, hex: site.hex, variant: Math.floor(world.rng.next() * 4), owner: chooseOwner(world, l), animals: 0,
     plannedAt: world.clock.totalSeconds,
   };
@@ -426,10 +445,11 @@ export function dailyTown(world: World, food: number): void {
   if (day === world.lastTownDay) return;
   world.lastTownDay = day;
   for (const s of world.structures) if (s.animals > 0 && s.animals < 12) s.animals += 1;
+  homeLife(world);
   const people = world.villagers.length;
   const happy = world.villagers.reduce((a, v) => a + v.fulfilment, 0) / Math.max(1, people);
   const room = housingCapacity(world) - people;
-  if (day > 0 && room >= 1 && food / Math.max(1, people) > 2.5 && happy > 0.35 && people < 60) {
+  if (day > 0 && room >= 1 && food / Math.max(1, people) > 1.5 && happy > 0.3 && people < 80) {
     const n = room >= 2 && world.rng.next() < 0.6 ? 2 : 1;
     const names: string[] = [];
     for (let k = 0; k < n; k++) names.push(addNewcomer(world).name);
@@ -438,7 +458,7 @@ export function dailyTown(world: World, food: number): void {
 }
 
 const syll = ['ka', 'ro', 'mi', 'ta', 'sen', 'lu', 'ar', 've', 'no', 'dra', 'il', 'ush', 'ba', 'tor', 'ye', 'ma', 'eth', 'ol', 'ri', 'van'];
-function addNewcomer(world: World): Villager {
+export function addNewcomer(world: World, at?: { x: number; z: number }): Villager {
   const rng = world.rng;
   let name = '';
   for (let i = 0, n = rng.int(2, 3); i < n; i++) name += rng.pick(syll);
@@ -446,7 +466,7 @@ function addNewcomer(world: World): Villager {
   // They walk in from the edge of the valley.
   const half = world.terrain.size / 2 - 8;
   const a = rng.next() * Math.PI * 2;
-  const spot = world.nav.nearestPassable(Math.cos(a) * half, Math.sin(a) * half) ?? { x: world.camp.center.x, z: world.camp.center.z };
+  const spot = at ?? world.nav.nearestPassable(Math.cos(a) * half, Math.sin(a) * half) ?? { x: world.camp.center.x, z: world.camp.center.z };
   const id = world.villagers.reduce((m, v) => Math.max(m, v.id), -1) + 1;
   const v: Villager = {
     id, name, passion: rng.pick(PASSIONS), talent: rng.pick(PASSIONS), prodigy: rng.next() < 0.08, look: id % 6, x: spot.x, z: spot.z, heading: 0, vx: 0, vz: 0,
@@ -458,24 +478,71 @@ function addNewcomer(world: World): Villager {
   return v;
 }
 
-/** Where a villager sleeps: their home if they have one, otherwise a tent. */
-export function bedFor(world: World, v: Villager): { x: number; z: number } {
-  const homes = world.structures.filter((s) => s.line === 'housing' && s.tier >= 0);
-  // Fill homes in order; the rest sleep in the tents.
-  const tentBeds = world.camp.tents.length * 2;
-  const order = world.villagers.indexOf(v);
-  let slot = order - tentBeds;
-  if (slot < 0) {
-    const t = world.camp.tents[order % world.camp.tents.length];
-    return { x: t.x, z: t.z };
-  }
-  for (const h of homes) {
+/** Homes, best first: the best homes fill first, so tents empty out as roundhouses go up. */
+function homes(world: World): Structure[] {
+  return world.structures.filter((s) => s.line === 'housing' && s.tier >= 0).sort((a, b) => b.tier - a.tier || a.id - b.id);
+}
+
+/** The home a villager sleeps in (null = no bed: sleeps by the fire). */
+export function homeOf(world: World, v: Villager): Structure | null {
+  let slot = world.villagers.indexOf(v);
+  for (const h of homes(world)) {
     const cap = tierOf(h)!.housing ?? 0;
-    if (slot < cap) return { x: h.x + Math.sin(h.rot) * 1.2, z: h.z + Math.cos(h.rot) * 1.2 };
+    if (slot < cap) return h;
     slot -= cap;
   }
-  const t = world.camp.tents[order % world.camp.tents.length];
-  return { x: t.x, z: t.z };
+  return null;
+}
+
+/** Where a villager sleeps: just inside their home's door, or by the fire. */
+export function bedFor(world: World, v: Villager): { x: number; z: number } {
+  const h = homeOf(world, v);
+  if (!h) return { x: world.camp.fire.x + 2, z: world.camp.fire.z + 2 };
+  return { x: h.x + Math.sin(h.rot) * 1.2, z: h.z + Math.cos(h.rot) * 1.2 };
+}
+
+/** How content a home makes people (by tier: tent, roundhouse, longhouse, …). */
+const HOME_COMFORT = [0.35, 0.6, 0.68, 0.74, 0.8, 0.82, 0.86, 0.95];
+
+/**
+ * Daily: a better home makes people happier and having no bed makes them miserable.
+ * Spare homes, worst first, are taken down; a band that stays miserable loses people.
+ */
+function homeLife(world: World): void {
+  for (const v of world.villagers) {
+    const h = homeOf(world, v);
+    const comfort = h ? HOME_COMFORT[h.tier] : 0.1;
+    v.fulfilment = Math.max(0, Math.min(1, v.fulfilment + (comfort - 0.5) * 0.12));
+  }
+  const people = world.villagers.length;
+  const spare = housingCapacity(world) - people;
+  // Only outdated homes (below the best the town can build) are taken down, and only when
+  // nobody needs the beds.
+  const hs = homes(world).filter((s) => !underConstruction(s));
+  const worst = hs[hs.length - 1];
+  const best = bestTier(world, LINE_BY_ID.get('housing')!);
+  if (worst && hs.length > 1 && worst.tier < best && spare >= (tierOf(worst)!.housing ?? 0) + 2) {
+    world.structures.splice(world.structures.indexOf(worst), 1);
+    world.structuresVersion++;
+    logEvent(world, `With room to spare, an old ${tierOf(worst)!.name.toLowerCase()} was taken down.`);
+  }
+  const happy = world.villagers.reduce((a, v) => a + v.fulfilment, 0) / Math.max(1, people);
+  if (happy < 0.22 && people > 5) {
+    const v = [...world.villagers].sort((a, b) => a.fulfilment - b.fulfilment)[0];
+    world.villagers.splice(world.villagers.indexOf(v), 1);
+    world.rosterVersion++;
+    logEvent(world, `${v.name}, unhappy here, left the band to seek a better life.`);
+  }
+}
+
+/** The camp's tents become the town's first homes. */
+export function foundTown(world: World): void {
+  for (const t of world.camp.tents) {
+    world.structures.push({
+      id: world.nextStructureId++, line: 'housing', tier: 0, target: 0, progress: 0, supplied: true,
+      x: t.x, z: t.z, rot: t.rot, hex: hexKey(worldToHexLocal(t.x, t.z)), variant: world.structures.length % 4, owner: null, animals: 0, plannedAt: 0,
+    });
+  }
 }
 
 // ------------------------------------------------------------------ roads

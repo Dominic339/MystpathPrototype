@@ -24,7 +24,7 @@ import { CYCLE_SECONDS, SEASONS } from './time';
 import { calendar } from './time';
 import type { World } from './world';
 
-export const ACTIVITIES = ['resting', 'walking', 'gathering', 'fetching-water', 'crafting', 'sleeping'] as const;
+export const ACTIVITIES = ['resting', 'walking', 'gathering', 'fetching-water', 'crafting', 'sleeping', 'paddling', 'boat-fishing', 'trawling'] as const;
 export type Activity = (typeof ACTIVITIES)[number];
 
 export type Target = { type: 'node'; index: number } | { type: 'hex'; index: number } | { type: 'herd'; index: number } | { type: 'structure'; id: number };
@@ -41,6 +41,16 @@ export type Task =
     }
   | { kind: 'process'; recipe: string; stage: 'going' | 'working'; spot: { x: number; z: number }; face: { x: number; z: number }; structure?: number }
   | { kind: 'build'; structure: number; stage: 'going' | 'working'; spot: { x: number; z: number } }
+  | {
+      kind: 'boat';
+      herd: number;
+      stage: 'walking' | 'out' | 'fishing' | 'back' | 'ashore';
+      launch: { x: number; z: number };
+      entry: { x: number; z: number };
+      route: { x: number; z: number }[];
+      /** Trawling a net (once net fishing is known) instead of fishing with a line. */
+      trawl: boolean;
+    }
   | { kind: 'eat'; stage: 'going' | 'eating'; spot: { x: number; z: number } }
   | { kind: 'sleep'; stage: 'going' | 'sleeping'; spot: { x: number; z: number } }
   | { kind: 'idle'; stage: 'going' | 'resting'; spot: { x: number; z: number } };
@@ -92,6 +102,7 @@ const HUNT_CARRY = 36;
 /** One fish takes this much of a shoal's count. */
 const FISH_SHARE = 0.1;
 const BUILD_CHUNK = 120;
+const PADDLE = 1.7;
 void CYCLE_SECONDS;
 
 const DOING: Record<string, string> = {
@@ -112,8 +123,47 @@ function availableMethods(world: World, provided: Map<string, Structure[]>): Acq
     (m) =>
       (m.facility === null || provided.has(m.facility)) &&
       m.requires.every((r) => knows(world, r)) &&
-      (m.id !== 'canoe-fishing' || stock(world, 'dugout-canoe') >= 1),
+      (m.id !== 'canoe-fishing' || canoesFree(world) > 0),
   );
+}
+
+/** Boats the band owns that nobody is out in. */
+export function canoesFree(world: World): number {
+  const owned = Math.floor(stock(world, 'dugout-canoe')) + Math.floor(stock(world, 'plank-boat'));
+  const out = world.villagers.filter((v) => v.task?.kind === 'boat' && v.task.stage !== 'walking' && v.task.stage !== 'ashore').length;
+  return owned - out;
+}
+
+/** Where boats are launched: the landing if there is one, else the riverbank nearest the town. */
+export function launchSite(world: World): { x: number; z: number } {
+  const landing = world.structures.find((s) => s.line === 'port' && s.tier >= 0);
+  if (landing) return world.nav.nearestPassable(landing.x, landing.z) ?? { x: landing.x, z: landing.z };
+  return riverbankSite(world);
+}
+
+/** Plan a canoe trip out to a fish shoal. */
+function planBoatTrip(world: World, v: Villager): Extract<Task, { kind: 'boat' }> | null {
+  const launch = launchSite(world);
+  const entry = world.waterNav.nearestPassable(launch.x, launch.z);
+  if (!entry || Math.hypot(entry.x - launch.x, entry.z - launch.z) > 12) return null;
+  let best: { i: number; route: { x: number; z: number }[] } | null = null;
+  let bestScore = 0;
+  for (let i = 0; i < world.herds.length; i++) {
+    const h = world.herds[i];
+    if (!h.species.endsWith('fish') || h.count < 1) continue;
+    const at = world.waterNav.nearestPassable(h.x, h.z);
+    if (!at) continue;
+    const d = Math.hypot(at.x - entry.x, at.z - entry.z);
+    const score = h.count / (1 + d / 60);
+    if (score <= bestScore) continue;
+    const route = world.waterNav.findPath(entry.x, entry.z, at.x, at.z);
+    if (!route) continue;
+    best = { i, route };
+    bestScore = score;
+  }
+  if (!best) return null;
+  void v;
+  return { kind: 'boat', herd: best.i, stage: 'walking', launch, entry, route: best.route, trawl: knows(world, 'net-fishing') };
 }
 
 /** Recipes this band can make: at the camp's own spots or at a building that provides the facility. */
@@ -145,7 +195,7 @@ function targets(people: number): Record<string, number> {
     tallow: 4,
     'dried-fruit': people,
     // A boat or two once the band can make them, and an airship eventually.
-    'dugout-canoe': 2,
+    'dugout-canoe': 2 + Math.floor(people / 12),
     'plank-boat': 2,
     'sailing-ship': 1,
     steamship: 1,
@@ -259,8 +309,8 @@ export function rankJobs(world: World, v: Villager): Choice[] {
   // With nothing pressing, people practise what they love: passion work is always a little wanted.
   const floor = (job: JobId) => (passionJobs.includes(job) ? 0.12 : 0);
   for (const m of availableMethods(world, provided)) {
-    // Working at a building beats doing the same by hand.
-    const base = Math.max(methodNeed(m, needs), floor(m.job)) * (m.facility ? 1.25 : 1);
+    // Working at a building, or from a boat, beats doing the same by hand from the bank.
+    const base = Math.max(methodNeed(m, needs), floor(m.job)) * (m.facility ? 1.25 : m.id === 'canoe-fishing' ? 1.5 : 1);
     if (base <= 0) continue;
     out.push({ job: m.job, score: weigh(m.job, base), method: m.id });
   }
@@ -436,6 +486,13 @@ function decide(world: World, v: Villager): void {
   const needs = materialNeeds(world);
   for (const choice of ranked.slice(0, 3)) {
     if (choice.score < 0.06) break;
+    if (choice.method === 'canoe-fishing') {
+      const trip = planBoatTrip(world, v);
+      if (!trip || !startPath(world, v, trip.launch)) continue;
+      v.task = trip;
+      v.job = 'fisher';
+      return;
+    }
     if (choice.method) {
       const m = METHOD_BY_ID.get(choice.method)!;
       const t = chooseTarget(world, m, needs);
@@ -624,6 +681,9 @@ export function stepVillager(world: World, v: Villager, dt: number): void {
       }
       return;
     }
+    case 'boat':
+      boatStep(world, v, task, dt);
+      return;
     case 'gather': {
       const m = METHOD_BY_ID.get(task.method)!;
       if (task.target.type === 'herd' && m.source === 'herd') {
@@ -657,6 +717,105 @@ export function stepVillager(world: World, v: Villager, dt: number): void {
       deliver(world, v);
       return;
     }
+  }
+}
+
+/** Paddle along a water route. Returns true on arrival. */
+function paddle(v: Villager, route: { x: number; z: number }[], speed: number, dt: number): boolean {
+  let remaining = speed * dt;
+  v.vx = 0;
+  v.vz = 0;
+  while (remaining > 0 && route.length) {
+    const p = route[0];
+    const dx = p.x - v.x;
+    const dz = p.z - v.z;
+    const d = Math.hypot(dx, dz);
+    if (d <= remaining) {
+      v.x = p.x;
+      v.z = p.z;
+      remaining -= d;
+      route.shift();
+    } else {
+      v.x += (dx / d) * remaining;
+      v.z += (dz / d) * remaining;
+      v.heading = Math.atan2(dx, dz);
+      v.vx = (dx / d) * speed;
+      v.vz = (dz / d) * speed;
+      remaining = 0;
+    }
+  }
+  return route.length === 0;
+}
+
+/**
+ * A canoe trip: walk to the landing, push off, paddle out to a shoal, fish (or trawl a net
+ * once net fishing is known), paddle back, come ashore and carry the catch home.
+ */
+function boatStep(world: World, v: Villager, task: Extract<Task, { kind: 'boat' }>, dt: number): void {
+  const m = METHOD_BY_ID.get('canoe-fishing')!;
+  switch (task.stage) {
+    case 'walking':
+      // Arrived at the landing (walking is handled by the path); the boat may have been taken.
+      if (canoesFree(world) <= 0) {
+        v.task = null;
+        return;
+      }
+      v.x = task.entry.x;
+      v.z = task.entry.z;
+      task.stage = 'out';
+      return;
+    case 'out': {
+      v.activity = 'paddling';
+      if (!paddle(v, task.route, PADDLE, dt)) return;
+      task.stage = 'fishing';
+      v.timer = workSeconds(v, m.job, m.seconds) * 2;
+      if (task.trawl) {
+        // A slow loop around the shoal, dragging the net.
+        const h = world.herds[task.herd];
+        for (let k = 1; k <= 6; k++) {
+          const a = (k / 6) * Math.PI * 2;
+          const p = world.waterNav.nearestPassable(h.x + Math.cos(a) * 7, h.z + Math.sin(a) * 7);
+          if (p) task.route.push(p);
+        }
+      }
+      return;
+    }
+    case 'fishing': {
+      v.activity = task.trawl ? 'trawling' : 'boat-fishing';
+      if (task.trawl) {
+        if (!task.route.length) {
+          const h = world.herds[task.herd];
+          const a = world.rng.next() * Math.PI * 2;
+          const p = world.waterNav.nearestPassable(h.x + Math.cos(a) * 7, h.z + Math.sin(a) * 7);
+          if (p) task.route.push(p);
+        }
+        paddle(v, task.route, 0.6, dt);
+      } else {
+        v.vx = v.vz = 0;
+      }
+      v.timer -= dt;
+      if (v.timer > 0) return;
+      const h = world.herds[task.herd];
+      const haul = task.trawl ? { ...m, yields: { fish: (m.yields.fish ?? 4) * 1.6 } } : m;
+      fishCycle(world, v, haul, h);
+      fishCycle(world, v, haul, h);
+      addXp(v, m.job, 16);
+      gainInsight(world, v, m.id, m.job, level(v.skills[m.job] ?? 0), task.trawl ? 'trawling a net from a canoe' : DOING[m.id]);
+      task.route = world.waterNav.findPath(v.x, v.z, task.entry.x, task.entry.z) ?? [{ ...task.entry }];
+      task.stage = 'back';
+      return;
+    }
+    case 'back':
+      v.activity = 'paddling';
+      if (!paddle(v, task.route, PADDLE, dt)) return;
+      v.x = task.launch.x;
+      v.z = task.launch.z;
+      task.stage = 'ashore';
+      headHome(world, v);
+      return;
+    case 'ashore':
+      deliver(world, v);
+      return;
   }
 }
 

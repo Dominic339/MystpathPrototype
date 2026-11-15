@@ -361,8 +361,8 @@ export interface VillagerView {
   update: (dt: number, time: number) => void;
   /** World position of a villager, for camera follow. */
   positionOf: (index: number) => THREE.Vector3 | null;
-  /** Newcomers: make figures for any villagers not yet drawn. */
-  setRoster: (looks: number[]) => void;
+  /** The roster changed (newcomers, leavers): match figures to it by villager id. */
+  setRoster: (list: { id: number; look: number }[]) => void;
 }
 
 export function buildVillagers(looks: number[], terrain: Heightfield): VillagerView {
@@ -374,18 +374,29 @@ export function buildVillagers(looks: number[], terrain: Heightfield): VillagerV
     return f;
   });
   let initialised = false;
-  const fresh = new Set<number>();
+  const fresh = new Set<Figure>();
+  let ids = looks.map((_, i) => i);
   let tickAt = performance.now();
 
   return {
     group,
-    setRoster(all) {
-      for (let i = figures.length; i < all.length; i++) {
-        const f = makeFigure(all[i], i);
+    setRoster(list) {
+      const byId = new Map(ids.map((id, i) => [id, figures[i]]));
+      const next = list.map((e) => {
+        const have = byId.get(e.id);
+        if (have) {
+          byId.delete(e.id);
+          return have;
+        }
+        const f = makeFigure(e.look, e.id);
         group.add(f.root);
-        figures.push(f);
-        fresh.add(i);
-      }
+        fresh.add(f);
+        return f;
+      });
+      for (const gone of byId.values()) group.remove(gone.root);
+      figures.length = 0;
+      figures.push(...next);
+      ids = list.map((e) => e.id);
     },
     positionOf: (i) => (figures[i] ? figures[i].root.position.clone() : null),
     setTargets(buf) {
@@ -404,11 +415,11 @@ export function buildVillagers(looks: number[], terrain: Heightfield): VillagerV
           f.bundle.visible = f.carry >= 0;
           if (f.carry >= 0) f.bundle.material = mat(CARRY_COLORS[f.carry] ?? '#8a6a46', 0.95);
         }
-        if (!initialised || fresh.has(k)) {
+        if (!initialised || fresh.has(f)) {
           f.x = f.tx;
           f.z = f.tz;
           f.heading = f.theading;
-          fresh.delete(k);
+          fresh.delete(f);
         }
       });
       initialised = true;
@@ -433,8 +444,8 @@ export function buildVillagers(looks: number[], terrain: Heightfield): VillagerV
         f.root.position.set(f.x, terrain.sample(f.x, f.z), f.z);
         f.root.rotation.y = f.heading;
         const actName = ACTIVITY_CODES[f.activity] ?? 'resting';
-        // Asleep in the tent.
-        f.root.visible = actName !== 'sleeping';
+        // Asleep at home, or out in a canoe (the boat draws its own paddler).
+        f.root.visible = actName !== 'sleeping' && actName !== 'paddling' && actName !== 'boat-fishing' && actName !== 'trawling';
 
         // Drive the walk cycle from the distance actually covered, so feet never slide.
         const moved = Math.hypot(f.x - ox, f.z - oz);

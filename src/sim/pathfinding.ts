@@ -16,7 +16,8 @@ export class NavGrid {
   /** Road surface tier per cell (0 = none; see ROAD_TIERS). */
   road: Uint8Array;
 
-  constructor(terrain: Heightfield) {
+  /** `water` makes a grid for boats: open water is passable, land is not. */
+  constructor(terrain: Heightfield, readonly mode: 'land' | 'water' = 'land') {
     this.size = terrain.size;
     this.n = Math.floor(terrain.size / NAV_CELL);
     this.cost = new Float32Array(this.n * this.n);
@@ -27,6 +28,10 @@ export class NavGrid {
         const { x, z } = this.cellCenter(i, j);
         const h = terrain.sample(x, z);
         const k = j * this.n + i;
+        if (mode === 'water') {
+          this.cost[k] = h < terrain.waterLevel - 0.45 ? 1 : Infinity;
+          continue;
+        }
         if (h < terrain.waterLevel + 0.12) {
           this.cost[k] = Infinity;
           continue;

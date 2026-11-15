@@ -277,7 +277,9 @@ function propeller(): THREE.Group {
 
 export interface AirshipBuild {
   group: THREE.Group;
-  update: (time: number, night: number) => void;
+  /** Where its voyage has it now (from the simulation); state 2 = away beyond the valley. */
+  setTarget: (x: number, y: number, z: number, heading: number, state: number) => void;
+  update: (time: number, night: number, dt: number) => void;
 }
 
 export function buildAirship(): AirshipBuild {
@@ -343,19 +345,35 @@ export function buildAirship(): AirshipBuild {
   }
 
   ship.scale.setScalar(0.85);
+  const target = new THREE.Vector3();
+  let targetHeading = 0;
+  let heading = 0;
+  let placed = false;
+  let docked = false;
   return {
     group,
-    update: (time, night) => {
-      const R = 95;
-      const period = 150;
-      const a = (time / period) * Math.PI * 2;
-      const cx = 10;
-      const cz = 5;
-      group.position.set(cx + Math.cos(a) * R, 60 + Math.sin(time * 0.35) * 1.5, cz + Math.sin(a) * R);
-      // Face along the direction of travel (counter-clockwise) and bank into the turn.
-      group.rotation.set(0, -a - Math.PI / 2, 0);
-      ship.rotation.x = -0.1;
-      ship.rotation.z = Math.sin(time * 0.5) * 0.02;
+    setTarget(x, y, z, h, state) {
+      target.set(x, y, z);
+      targetHeading = h;
+      docked = state === 0;
+      group.visible = state !== 2;
+      if (!placed || group.position.distanceTo(target) > 60) {
+        group.position.copy(target);
+        heading = h;
+        placed = true;
+      }
+    },
+    update: (time, night, dt) => {
+      // Glide toward the simulated position, turning gently onto its course.
+      group.position.lerp(target, Math.min(1, dt * 1.5));
+      group.position.y += Math.sin(time * 0.35) * 0.02;
+      let dh = targetHeading - heading;
+      dh = Math.atan2(Math.sin(dh), Math.cos(dh));
+      heading += dh * Math.min(1, dt * 0.8);
+      // The model's bow points along +x; the simulation's heading is atan2(dx, dz).
+      group.rotation.set(0, heading - Math.PI / 2, 0);
+      ship.rotation.x = docked ? 0 : -0.06;
+      ship.rotation.z = Math.sin(time * 0.5) * 0.02 - dh * 0.15;
       props.forEach((p, k) => (p.rotation.x = time * (14 + k)));
       lanternMat.emissiveIntensity = 0.6 + night * 3;
     },

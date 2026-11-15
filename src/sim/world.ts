@@ -4,7 +4,8 @@
 import { PASSIONS, type Passion } from './data/jobs';
 import { stepHerds, type Herd } from './animals';
 import { DISCOVERIES } from './data/discoveries';
-import { dailyTown, growRoads, planTown, supplySites, type Structure } from './town';
+import { dailyTown, foundTown, growRoads, planTown, supplySites, type Structure } from './town';
+import { stepVoyages, type Voyage } from './vehicles';
 import { foodTotal, spoilFood } from './food';
 import { NavGrid } from './pathfinding';
 import { buildHexResources, buildNodes, regrowResources, type HexResources, type ResourceNode } from './resources';
@@ -76,6 +77,10 @@ export interface World {
   /** The chronicle: notable things that happened. */
   events: { t: number; text: string }[];
   nav: NavGrid;
+  /** Open water, for boats. */
+  waterNav: NavGrid;
+  /** Airships and ships on their voyages. */
+  voyages: Voyage[];
   villagers: Villager[];
   rng: Rng;
 }
@@ -124,7 +129,7 @@ export function createWorld(seed: number): World {
       fulfilment: 0.5,
     });
   }
-  return {
+  const world: World = {
     seed,
     clock: new GameClock(),
     terrain: scene.terrain,
@@ -151,9 +156,14 @@ export function createWorld(seed: number): World {
     roadTimer: 0,
     events: [],
     nav: new NavGrid(scene.terrain),
+    waterNav: new NavGrid(scene.terrain, 'water'),
+    voyages: [],
     villagers,
     rng,
   };
+  // The camp's tents are the town's first homes.
+  foundTown(world);
+  return world;
 }
 
 /** Grant every discovery and a canoe and airship (debug and showcase). */
@@ -182,6 +192,7 @@ export function tick(world: World, dt: number): void {
   supplySites(world);
   planTown(world, materialNeeds(world), dt);
   dailyTown(world, foodTotal(world));
+  stepVoyages(world, dt);
   world.roadTimer -= dt;
   if (world.roadTimer <= 0) {
     world.roadTimer = 30;

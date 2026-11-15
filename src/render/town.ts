@@ -9,8 +9,11 @@ import type { StructureView } from '../sim/protocol';
 import type { Heightfield } from '../sim/terrain';
 import { ANIMAL_MATERIAL, staticAnimalGeometry } from './animals';
 import { buildingGeometry, scaffoldGeometry, type TownStyle } from './buildings';
+import { natureMaterial } from './materials';
 
-const MATERIAL = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9, side: THREE.DoubleSide });
+// The same grained material as the tents and the rest of the camp.
+const newMaterial = () => natureMaterial({ roughness: 0.92, side: THREE.DoubleSide });
+const MATERIAL = newMaterial();
 
 interface Entry {
   key: string;
@@ -57,7 +60,7 @@ export function buildTown(terrain: Heightfield, style: TownStyle): TownView {
     const rising = v.built < 1 && !showOld;
     if (rising) {
       clip = new THREE.Plane(new THREE.Vector3(0, -1, 0), baseY + 0.05 + height * v.built);
-      const m = MATERIAL.clone();
+      const m = newMaterial();
       m.clippingPlanes = [clip];
       m.clipShadows = true;
       mat = m;

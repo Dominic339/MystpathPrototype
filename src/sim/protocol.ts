@@ -12,6 +12,9 @@ export type ToSim =
   | { type: 'grantDiscoveries'; ids: string[] | 'all' }
   | { type: 'save' };
 
+/** Voyages (airships) packed as [x, y, z, heading, state, kind] each. */
+export const VOYAGE_STRIDE = 6;
+
 /** Herd state packed as [x, z, heading, count, state, vx, vz, species] per herd. */
 export const HERD_STRIDE = 8;
 
@@ -100,7 +103,7 @@ export type FromSim =
       herds: { species: string; max: number }[];
       navSize: number;
     }
-  | { type: 'tick'; totalSeconds: number; speed: number; villagers: Float32Array; herds: Float32Array }
+  | { type: 'tick'; totalSeconds: number; speed: number; villagers: Float32Array; herds: Float32Array; voyages: Float32Array }
   | { type: 'stats'; stats: Stats }
   | { type: 'wear'; n: number; data: Float32Array; roads: Uint8Array }
   | { type: 'structures'; list: StructureView[] }

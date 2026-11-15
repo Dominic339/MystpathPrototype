@@ -26,7 +26,8 @@ import { VILLAGER_STRIDE, type FromSim, type HexInfo, type Stats, type ToSim } f
 import { hexCorners, worldToHex, type Hex } from './sim/hex';
 import { buildTerrain } from './render/terrainMesh';
 import { WaterSystem } from './render/water';
-import { buildBoat, type BoatView } from './render/boat';
+import { buildBoat, canoeGeometry, type BoatMode, type BoatView } from './render/boat';
+import { natureMaterial } from './render/materials';
 import { buildSky, skyState } from './render/sky';
 import { buildVegetation } from './render/vegetation';
 import { buildGrass } from './render/grass';
@@ -171,7 +172,32 @@ const send = (msg: ToSim) => worker.postMessage(msg);
 
 let terrain: Heightfield | null = null;
 let water: WaterSystem | null = null;
-let boat: BoatView | null = null;
+/** One boat per villager out on the water, keyed by villager index. */
+const boats = new Map<number, BoatView>();
+const mooredGroup = new THREE.Group();
+let canoesOwned = 0;
+let landingSpot: { x: number; z: number; rot: number } | null = null;
+const canoeMat = natureMaterial({ roughness: 0.85 });
+let canoeGeo: THREE.BufferGeometry | null = null;
+
+function updateMoored(): void {
+  mooredGroup.clear();
+  if (!landingSpot || !water) return;
+  const idle = Math.max(0, Math.min(4, canoesOwned - boats.size));
+  for (let k = 0; k < idle; k++) {
+    canoeGeo ??= canoeGeometry();
+    const m = new THREE.Mesh(canoeGeo, canoeMat);
+    // Side by side along the jetty, bows pointing out over the water.
+    const side = (k - (idle - 1) / 2) * 1.2;
+    const out = 3.5;
+    const x = landingSpot.x + Math.sin(landingSpot.rot) * out + Math.cos(landingSpot.rot) * side;
+    const z = landingSpot.z + Math.cos(landingSpot.rot) * out - Math.sin(landingSpot.rot) * side;
+    m.position.set(x, terrain ? Math.max(terrain.waterLevel + 0.12, terrain.sample(x, z) + 0.1) : 0, z);
+    m.rotation.y = landingSpot.rot - Math.PI / 2;
+    m.castShadow = true;
+    mooredGroup.add(m);
+  }
+}
 let camp: CampBuild | null = null;
 let villagers: VillagerView | null = null;
 let animals: AnimalsView | null = null;
@@ -201,14 +227,9 @@ worker.onmessage = (e: MessageEvent<FromSim>) => {
     scene.add(buildGrass(terrain, built.mesh, built.grassWeight, lowQuality ? 18000 : 48000));
     water = new WaterSystem(terrain, msg.flow);
     scene.add(water.mesh);
-    // Boat route: down the river (starting inside the map), then a loop of the lake.
-    const half = terrain.size / 2 - 12;
-    const river = msg.waterway.river.filter(([x, z]) => Math.abs(x) < half && Math.abs(z) < half);
-    const lk = msg.waterway.lake;
-    const lakeLoop: [number, number][] = [0, 1, 2, 3, 4, 5].map((k) => [lk.x + Math.cos(-2.3 + k * 1.05) * lk.r * 0.45, lk.z + Math.sin(-2.3 + k * 1.05) * lk.r * 0.45]);
-    boat = buildBoat(water, [...river, ...lakeLoop]);
-    boat.group.visible = false;
-    scene.add(boat.group);
+    // Canoes are drawn where fishers take them; idle ones lie moored at the landing.
+    mooredGroup.clear();
+    scene.add(mooredGroup);
     animals = buildAnimals(msg.herds, terrain, water);
     scene.add(animals.group);
     town = buildTown(terrain, townStyle(seed, params.has('style') ? Number(params.get('style')) : undefined));
@@ -237,6 +258,32 @@ worker.onmessage = (e: MessageEvent<FromSim>) => {
     lastTickAt = performance.now();
     villagers?.setTargets(msg.villagers);
     animals?.setTargets(msg.herds);
+    // Fishers out in canoes: each gets a boat that follows them.
+    const out = new Set<number>();
+    for (let k = 0, i = 0; k < msg.villagers.length; k += VILLAGER_STRIDE, i++) {
+      const act = msg.villagers[k + 3];
+      if (act < 6 || act > 8 || !water) continue;
+      out.add(i);
+      let b = boats.get(i);
+      if (!b) {
+        b = buildBoat(water, i % 6, i, [msg.villagers[k], msg.villagers[k + 1]]);
+        boats.set(i, b);
+        scene.add(b.group);
+      }
+      const mode: BoatMode = act === 6 ? 'paddle' : act === 7 ? 'fish' : 'trawl';
+      b.setTarget(msg.villagers[k], msg.villagers[k + 1], mode);
+    }
+    let changed = false;
+    for (const [i, b] of boats)
+      if (!out.has(i)) {
+        scene.remove(b.group);
+        boats.delete(i);
+        changed = true;
+      }
+    if (changed || out.size !== mooredGroup.children.length) updateMoored();
+    // The airship follows its voyage.
+    airship.group.visible = msg.voyages.length > 0;
+    if (msg.voyages.length) airship.setTarget(msg.voyages[0], msg.voyages[1], msg.voyages[2], msg.voyages[3], msg.voyages[4]);
     // Villagers fetching water stir the surface.
     for (let k = 0; k < msg.villagers.length; k += VILLAGER_STRIDE) {
       if (msg.villagers[k + 3] === 3 && Math.random() < 0.15) {
@@ -261,10 +308,14 @@ worker.onmessage = (e: MessageEvent<FromSim>) => {
   } else if (msg.type === 'stats') {
     const prev = latestStats;
     latestStats = msg.stats;
-    const hasCanoe = msg.stats.vehicles.some((v) => v.id === 'dugout-canoe' || v.id === 'plank-boat');
+    const canoes = msg.stats.vehicles.filter((v) => v.id === 'dugout-canoe' || v.id === 'plank-boat').reduce((n, v) => n + v.count, 0);
+    const hasCanoe = canoes > 0;
+    if (canoes !== canoesOwned) {
+      canoesOwned = canoes;
+      updateMoored();
+    }
     const hasAirship = msg.stats.vehicles.some((v) => v.id === 'airship' || v.id === 'motor-airship');
-    if (boat) boat.group.visible = hasCanoe;
-    airship.group.visible = hasAirship;
+
     followButtons[0].style.display = hasAirship ? '' : 'none';
     followButtons[1].style.display = hasCanoe ? '' : 'none';
     // Announce new events from the chronicle.
@@ -273,8 +324,11 @@ worker.onmessage = (e: MessageEvent<FromSim>) => {
     if (panel.style.display !== 'none') renderPanel();
   } else if (msg.type === 'structures') {
     town?.setStructures(msg.list);
+    const l = msg.list.find((s) => s.model === 'landing' || s.previous === 'landing') ?? msg.list.find((s) => s.line === 'port');
+    landingSpot = l && l.built >= 1 ? { x: l.x, z: l.z, rot: l.rot } : null;
+    updateMoored();
   } else if (msg.type === 'roster') {
-    villagers?.setRoster(msg.villagers.map((v) => v.look));
+    villagers?.setRoster(msg.villagers);
   } else if (msg.type === 'hexInfo') {
     showHexInfo(msg.info);
   } else if (msg.type === 'saved') {
@@ -459,7 +513,7 @@ const followTarget = (b: HTMLButtonElement, target: () => THREE.Vector3 | null, 
   }
 };
 followButtons.push(button('Follow airship', (b) => followTarget(b, () => airship.group.position.clone(), 38)));
-followButtons.push(button('Follow canoe', (b) => followTarget(b, () => (boat ? boat.group.position.clone() : null), 16)));
+followButtons.push(button('Follow canoe', (b) => followTarget(b, () => (boats.size ? [...boats.values()][0].group.position.clone() : null), 16)));
 followButtons.push(button('Camp', (b) => followTarget(b, () => (villagers ? villagers.positionOf(0) : null), 22)));
 rig.onUserMove = () => followButtons.forEach((x) => x.classList.remove('on'));
 if (params.get('follow') === 'airship') followButtons[0].click();
@@ -520,8 +574,8 @@ function frame(): void {
   camp?.update(realTime, s.night);
   villagers?.update(dt, realTime);
   animals?.update(dt, realTime);
-  airship.update(gameSeconds, s.night);
-  boat?.update(dt, realTime);
+  airship.update(gameSeconds, s.night, dt);
+  for (const b of boats.values()) b.update(dt, realTime);
 
   composer.render(dt);
   if (showUi) {

@@ -148,8 +148,13 @@ describe('gathering simulation', () => {
   it('the town builds, upgrades and grows', () => {
     const w = createWorld(7);
     for (let i = 0; i < 2400 * 20; i++) tick(w, 0.5); // twenty days
-    const done = w.structures.filter((s) => s.tier >= 0);
+    const done = w.structures.filter((s) => s.tier >= 0 && !(s.line === 'housing' && s.tier === 0));
     expect(done.length).toBeGreaterThan(2);
+    // The camp's tents are upgraded into better homes, and the band grows into them.
+    expect(w.structures.some((s) => s.line === 'housing' && s.tier >= 1)).toBe(true);
+    expect(w.villagers.length).toBeGreaterThan(7);
+    // Canoes are taken out to fish, not left idle.
+    if ((w.stockpile['dugout-canoe'] ?? 0) >= 1) expect(w.events.length).toBeGreaterThan(0);
     // Buildings never overlap each other.
     for (const a of w.structures) for (const b of w.structures) if (a !== b) expect(Math.hypot(a.x - b.x, a.z - b.z)).toBeGreaterThan(3);
   }, 120000);

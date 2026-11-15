@@ -11,7 +11,7 @@ import { hexKey, worldToHex } from './hex';
 import { JOB_NAMES, type JobId } from './data/jobs';
 import { MATERIAL_BY_ID } from './data/materials';
 import { itemName, PRODUCTS } from './data/processing';
-import { ACTIVITY_CODES, HERD_STRIDE, VILLAGER_STRIDE, type FromSim, type Stats, type ToSim } from './protocol';
+import { ACTIVITY_CODES, HERD_STRIDE, VILLAGER_STRIDE, VOYAGE_STRIDE, type FromSim, type Stats, type ToSim } from './protocol';
 import { saveWorld } from './save';
 import { LAKE, RIVER } from './testScene';
 import { carryCategory, foodTotal, level } from './villagerAI';
@@ -285,7 +285,17 @@ setInterval(() => {
     sentRoster = w.rosterVersion;
     post({ type: 'roster', villagers: w.villagers.map((v) => ({ id: v.id, name: v.name, look: v.look })) });
   }
-  post({ type: 'tick', totalSeconds: w.clock.totalSeconds, speed: w.clock.speed, villagers: buf, herds: hb }, [buf.buffer, hb.buffer]);
+  const vb = new Float32Array(w.voyages.length * VOYAGE_STRIDE);
+  w.voyages.forEach((v, k) => {
+    const o = k * VOYAGE_STRIDE;
+    vb[o] = v.x;
+    vb[o + 1] = v.y;
+    vb[o + 2] = v.z;
+    vb[o + 3] = v.heading;
+    vb[o + 4] = ['docked', 'outbound', 'away', 'inbound'].indexOf(v.state);
+    vb[o + 5] = 0;
+  });
+  post({ type: 'tick', totalSeconds: w.clock.totalSeconds, speed: w.clock.speed, villagers: buf, herds: hb, voyages: vb }, [buf.buffer, hb.buffer, vb.buffer]);
   // Buildings: whenever they change, and every couple of seconds while any is going up.
   const building = w.structures.some(underConstruction);
   if (w.structuresVersion !== sentStructures || (building && now - lastStructurePost > 2000)) {
