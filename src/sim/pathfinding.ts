@@ -15,6 +15,13 @@ export class NavGrid {
   wear: Float32Array;
   /** Road surface tier per cell (0 = none; see ROAD_TIERS). */
   road: Uint8Array;
+  /** Connected region per cell (-1 = impassable): routes between regions are impossible. */
+  region: Int32Array;
+  private gBuf?: Float32Array;
+  private cameBuf?: Int32Array;
+  private seen?: Uint32Array;
+  private done?: Uint32Array;
+  private stamp = 0;
 
   /** `water` makes a grid for boats: open water is passable, land is not. */
   constructor(terrain: Heightfield, readonly mode: 'land' | 'water' = 'land') {
@@ -23,6 +30,7 @@ export class NavGrid {
     this.cost = new Float32Array(this.n * this.n);
     this.wear = new Float32Array(this.n * this.n);
     this.road = new Uint8Array(this.n * this.n);
+    this.region = new Int32Array(this.n * this.n);
     for (let j = 0; j < this.n; j++)
       for (let i = 0; i < this.n; i++) {
         const { x, z } = this.cellCenter(i, j);
@@ -39,6 +47,93 @@ export class NavGrid {
         const slope = terrain.slope(x, z);
         this.cost[k] = slope > 1.4 ? Infinity : 1 + slope * slope * 6;
       }
+    this.labelRegions();
+  }
+
+  /** Flood-fill the passable cells into connected regions. */
+  private labelRegions(): void {
+    const n = this.n;
+    this.region.fill(-1);
+    let next = 0;
+    const stack: number[] = [];
+    for (let k0 = 0; k0 < n * n; k0++) {
+      if (this.region[k0] !== -1 || !Number.isFinite(this.cost[k0])) continue;
+      this.region[k0] = next;
+      stack.push(k0);
+      while (stack.length) {
+        const k = stack.pop()!;
+        const i = k % n;
+        const j = (k - i) / n;
+        for (const [di, dj] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+          const ni = i + di;
+          const nj = j + dj;
+          if (ni < 0 || nj < 0 || ni >= n || nj >= n) continue;
+          const nk = nj * n + ni;
+          if (this.region[nk] === -1 && Number.isFinite(this.cost[nk])) {
+            this.region[nk] = next;
+            stack.push(nk);
+          }
+        }
+      }
+      next++;
+    }
+  }
+
+  /**
+   * Walking cost from a point to every cell (Infinity beyond `maxCost`), following paths
+   * and roads like real routes do. Used to keep villagers to places within a sensible walk.
+   */
+  distanceField(x: number, z: number, maxCost = 160): Float32Array {
+    const n = this.n;
+    const dist = new Float32Array(n * n).fill(Infinity);
+    const s = this.nearestPassable(x, z);
+    if (!s) return dist;
+    const { i, j } = this.cellOf(s.x, s.z);
+    const heap = new MinHeap();
+    dist[j * n + i] = 0;
+    heap.push(j * n + i, 0);
+    while (heap.size) {
+      const k = heap.pop();
+      const d = dist[k];
+      if (d > maxCost) continue;
+      const ci = k % n;
+      const cj = (k - ci) / n;
+      for (let dj = -1; dj <= 1; dj++)
+        for (let di = -1; di <= 1; di++) {
+          if (!di && !dj) continue;
+          const ni = ci + di;
+          const nj = cj + dj;
+          if (ni < 0 || nj < 0 || ni >= n || nj >= n) continue;
+          const nk = nj * n + ni;
+          if (!Number.isFinite(this.cost[nk])) continue;
+          const nd = d + this.stepCost(nk) * (di && dj ? 1.414 : 1);
+          if (nd < dist[nk]) {
+            dist[nk] = nd;
+            heap.push(nk, nd);
+          }
+        }
+    }
+    return dist;
+  }
+
+  /** Look up a distance field at a point (via the nearest passable cell). */
+  fieldAt(field: Float32Array, x: number, z: number): number {
+    const p = this.passable(x, z) ? { x, z } : this.nearestPassable(x, z);
+    if (!p) return Infinity;
+    const { i, j } = this.cellOf(p.x, p.z);
+    return field[j * this.n + i];
+  }
+
+  regionAt(x: number, z: number): number {
+    const { i, j } = this.cellOf(x, z);
+    return this.region[j * this.n + i];
+  }
+
+  /** Can you get from one point to another at all? */
+  connected(ax: number, az: number, bx: number, bz: number): boolean {
+    const a = this.nearestPassable(ax, az);
+    const b = this.nearestPassable(bx, bz);
+    return !!a && !!b && this.regionAt(a.x, a.z) === this.regionAt(b.x, b.z);
   }
 
   cellCenter(i: number, j: number): { x: number; z: number } {
@@ -87,28 +182,43 @@ export class NavGrid {
     const sk = start.j * n + start.i;
     const gk = goal.j * n + goal.i;
     if (sk === gk) return [goalP];
-    const g = new Float32Array(n * n).fill(Infinity);
-    const came = new Int32Array(n * n).fill(-1);
-    const closed = new Uint8Array(n * n);
+    // Different regions (across water): no route, and no need to search.
+    if (this.region[sk] !== this.region[gk] || this.region[sk] < 0) return null;
+    // Search buffers are reused between calls; a stamp marks which entries belong to this search.
+    if (!this.gBuf) {
+      this.gBuf = new Float32Array(n * n);
+      this.cameBuf = new Int32Array(n * n);
+      this.seen = new Uint32Array(n * n);
+      this.done = new Uint32Array(n * n);
+    }
+    const stamp = ++this.stamp;
+    const gArr = this.gBuf!;
+    const came = this.cameBuf!;
+    const seen = this.seen!;
+    const done = this.done!;
+    const G = (k: number) => (seen[k] === stamp ? gArr[k] : Infinity);
     const heap = new MinHeap();
-    g[sk] = 0;
+    gArr[sk] = 0;
+    seen[sk] = stamp;
+    came[sk] = -1;
     heap.push(sk, 0);
     const h = (k: number) => {
       const dx = Math.abs((k % n) - goal.i);
       const dz = Math.abs(Math.floor(k / n) - goal.j);
-      return (Math.max(dx, dz) + 0.414 * Math.min(dx, dz)) * 0.4; // admissible with path discount
+      // Weighted toward the goal: much faster on a big map, and still follows worn paths and roads.
+      return (Math.max(dx, dz) + 0.414 * Math.min(dx, dz)) * 0.8;
     };
     let found = false;
     let expanded = 0;
     while (heap.size) {
       const k = heap.pop();
-      if (closed[k]) continue;
-      closed[k] = 1;
+      if (done[k] === stamp) continue;
+      done[k] = stamp;
       if (k === gk) {
         found = true;
         break;
       }
-      if (++expanded > 40000) break;
+      if (++expanded > 15000) break;
       const ci = k % n;
       const cj = Math.floor(k / n);
       for (let dj = -1; dj <= 1; dj++)
@@ -118,13 +228,14 @@ export class NavGrid {
           const nj = cj + dj;
           if (ni < 0 || nj < 0 || ni >= n || nj >= n) continue;
           const nk = nj * n + ni;
-          if (closed[nk] || !Number.isFinite(this.cost[nk])) continue;
+          if (done[nk] === stamp || !Number.isFinite(this.cost[nk])) continue;
           // No corner cutting past impassable cells.
           if (di && dj && (!Number.isFinite(this.cost[cj * n + ni]) || !Number.isFinite(this.cost[nj * n + ci]))) continue;
           const step = this.stepCost(nk) * (di && dj ? 1.414 : 1);
-          const ng = g[k] + step;
-          if (ng < g[nk]) {
-            g[nk] = ng;
+          const ng = gArr[k] + step;
+          if (ng < G(nk)) {
+            gArr[nk] = ng;
+            seen[nk] = stamp;
             came[nk] = k;
             heap.push(nk, ng + h(nk));
           }

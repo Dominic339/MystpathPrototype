@@ -13,7 +13,6 @@ import { MATERIAL_BY_ID } from './data/materials';
 import { itemName, PRODUCTS } from './data/processing';
 import { ACTIVITY_CODES, HERD_STRIDE, VILLAGER_STRIDE, VOYAGE_STRIDE, type FromSim, type Stats, type ToSim } from './protocol';
 import { saveWorld } from './save';
-import { LAKE, RIVER } from './testScene';
 import { carryCategory, foodTotal, level } from './villagerAI';
 import { activeStorage } from './food';
 import { housingCapacity, lineOf, roadName, tierOf, underConstruction } from './town';
@@ -204,7 +203,8 @@ self.onmessage = (e: MessageEvent<ToSim>) => {
         props: world.props,
         camp: world.camp,
         flow: { res: world.flow.res, size: world.flow.size, data: world.flow.data.slice() },
-        waterway: { river: RIVER.map(([x, z]) => [x, z] as [number, number]), lake: LAKE },
+        waterway: { river: world.river.map(([x, z]) => [x, z] as [number, number]), lake: world.lake },
+        biome: world.biome,
         villagers: world.villagers.map((v) => ({ id: v.id, name: v.name, passion: v.passion, look: v.look })),
         herds: world.herds.map((h) => ({ species: h.species, max: h.max })),
         navSize: world.nav.n,

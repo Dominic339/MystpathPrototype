@@ -4,7 +4,7 @@ import { Rng } from './rng';
 import { Heightfield } from './terrain';
 import { GameClock } from './time';
 import type { World } from './world';
-import { buildTestScene } from './testScene';
+import { buildWorld } from './worldgen';
 import { NavGrid } from './pathfinding';
 
 export const SAVE_VERSION = 7;
@@ -87,7 +87,10 @@ export function loadWorld(save: SaveFile): World {
     props: save.props,
     camp: save.camp,
     // The current is derived from the scene layout, so it is rebuilt rather than saved.
-    flow: buildTestScene(save.seed).flow,
+    ...(() => {
+      const sc = buildWorld(save.seed);
+      return { flow: sc.flow, river: sc.river, lake: sc.lake, biome: sc.biome };
+    })(),
     hexes: clone(save.hexes),
     nodes: clone(save.nodes),
     stockpile: clone(save.stockpile),
@@ -99,12 +102,14 @@ export function loadWorld(save: SaveFile): World {
     structures: clone(save.structures),
     ...save.town,
     structuresVersion: 1,
+    slowTimer: 0,
     rosterVersion: 1,
     roadsVersion: 1,
     spoilage: clone(save.spoilage),
     events: clone(save.events),
     nav,
     waterNav: new NavGrid(terrain, 'water'),
+    walkField: nav.distanceField(save.camp?.center?.x ?? 0, save.camp?.center?.z ?? 0),
     voyages: clone(save.voyages),
     villagers: clone(save.villagers),
   };

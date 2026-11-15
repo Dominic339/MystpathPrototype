@@ -19,10 +19,9 @@ import { currentEra, gainInsight, knows, logEvent, noteSeen } from './discovery'
 import { ROAD_TIERS } from './data/structures';
 import { bedFor, buildingWants, buildWork, lineOf, providedFacilities, tierOf, underConstruction, type Structure } from './town';
 import { hexToWorld } from './hex';
-import { RIVER } from './testScene';
 import { CYCLE_SECONDS, SEASONS } from './time';
 import { calendar } from './time';
-import type { World } from './world';
+import { walkCost, type World } from './world';
 
 export const ACTIVITIES = ['resting', 'walking', 'gathering', 'fetching-water', 'crafting', 'sleeping', 'paddling', 'boat-fishing', 'trawling'] as const;
 export type Activity = (typeof ACTIVITIES)[number];
@@ -349,6 +348,7 @@ function stationFor(world: World, recipe: Recipe): { spot: { x: number; z: numbe
 /** The riverbank spot nearest camp, where boats are built and launched. */
 export function riverbankSite(world: World): { x: number; z: number } {
   const c = world.camp.center;
+  const RIVER = world.river;
   let best = { x: RIVER[0][0], z: RIVER[0][1] };
   let bestD = Infinity;
   for (let k = 0; k < RIVER.length - 1; k++)
@@ -384,6 +384,8 @@ function chooseTarget(world: World, m: AcquisitionMethod, needs: Record<string, 
     best = f;
   };
   const jitter = () => 0.8 + world.rng.next() * 0.4;
+  // Only what is within a sensible walk of the town (no long detours around the river).
+  const reachable = (x: number, z: number) => walkCost(world, x, z) < 120;
 
   // Facility methods are worked at the building that provides them.
   if (m.facility) {
@@ -404,7 +406,7 @@ function chooseTarget(world: World, m: AcquisitionMethod, needs: Record<string, 
       if (!s) continue;
       const d = Math.hypot(n.x - camp.x, n.z - camp.z);
       if (d > 110) continue;
-      consider((s / (1 + d / 25)) * jitter(), () => (world.nav.nearestPassable(n.x, n.z) ? { target: { type: 'node', index: i }, spot: { x: n.x, z: n.z }, water: false } : null));
+      consider((s / (1 + d / 25)) * jitter(), () => (reachable(n.x, n.z) ? { target: { type: 'node', index: i }, spot: { x: n.x, z: n.z }, water: false } : null));
     }
   }
   if (m.source === 'ground' || m.source === 'water') {
@@ -420,7 +422,7 @@ function chooseTarget(world: World, m: AcquisitionMethod, needs: Record<string, 
       consider((s / (1 + d / 25)) * jitter(), () => {
         const j = waterHex ? 0 : 6;
         const spot = world.nav.nearestPassable(c.x + (world.rng.next() - 0.5) * j, c.z + (world.rng.next() - 0.5) * j);
-        return spot ? { target: { type: 'hex', index: i }, spot, water: m.source === 'water' || waterHex || h.env === 'riverbank' } : null;
+        return spot && reachable(spot.x, spot.z) ? { target: { type: 'hex', index: i }, spot, water: m.source === 'water' || waterHex || h.env === 'riverbank' } : null;
       });
     }
   }
@@ -446,7 +448,7 @@ function chooseTarget(world: World, m: AcquisitionMethod, needs: Record<string, 
         const a = Math.atan2(camp.x - h.x, camp.z - h.z);
         const r = sp.wariness * 1.2;
         const spot = world.nav.nearestPassable(h.x + Math.sin(a) * r, h.z + Math.cos(a) * r);
-        return spot ? { target: { type: 'herd', index: i }, spot, water: false } : null;
+        return spot && reachable(spot.x, spot.z) ? { target: { type: 'herd', index: i }, spot, water: false } : null;
       });
     }
   }

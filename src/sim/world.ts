@@ -11,13 +11,14 @@ import { NavGrid } from './pathfinding';
 import { buildHexResources, buildNodes, regrowResources, type HexResources, type ResourceNode } from './resources';
 import { Rng, subSeed } from './rng';
 import { Heightfield } from './terrain';
-import { buildTestScene, type FlowField } from './testScene';
+import { buildWorld, type FlowField } from './worldgen';
 import { calendar, GameClock, SEASONS } from './time';
 import { materialNeeds, stepVillager, type Villager } from './villagerAI';
 
 export type PropKind =
   | 'oak' | 'pine' | 'birch' | 'apple' | 'hazel' | 'bush' | 'berrybush' | 'rock' | 'boulder' | 'reeds' | 'flowers'
-  | 'grain' | 'tubers' | 'mushrooms' | 'flax' | 'beehive' | 'nest' | 'shellfish';
+  | 'grain' | 'tubers' | 'mushrooms' | 'flax' | 'beehive' | 'nest' | 'shellfish'
+  | 'tropical' | 'spirit' | 'bamboo' | 'cotton' | 'seaweed' | 'cactus' | 'scrub';
 
 export interface PropInstance {
   kind: PropKind;
@@ -25,6 +26,8 @@ export interface PropInstance {
   z: number;
   scale: number;
   rot: number;
+  /** The plant or animal species this prop is (when the model is shared by several). */
+  species?: string;
 }
 
 export interface Placement {
@@ -50,6 +53,11 @@ export interface World {
   props: PropInstance[];
   camp: CampLayout;
   flow: FlowField;
+  /** The river's course and the lake (for boats and the renderer). */
+  river: [number, number][];
+  lake: { x: number; z: number; r: number };
+  /** Environment map (see worldgen.ts). */
+  biome: Uint8Array;
   hexes: HexResources[];
   nodes: ResourceNode[];
   stockpile: Record<string, number>;
@@ -74,11 +82,14 @@ export interface World {
   rosterVersion: number;
   roadsVersion: number;
   roadTimer: number;
+  slowTimer: number;
   /** The chronicle: notable things that happened. */
   events: { t: number; text: string }[];
   nav: NavGrid;
   /** Open water, for boats. */
   waterNav: NavGrid;
+  /** Walking cost from the town centre to every cell, refreshed daily. */
+  walkField: Float32Array;
   /** Airships and ships on their voyages. */
   voyages: Voyage[];
   villagers: Villager[];
@@ -91,7 +102,7 @@ const SYLLABLES = ['ka', 'ro', 'mi', 'ta', 'sen', 'lu', 'ar', 've', 'no', 'dra',
 const START_PASSIONS: Passion[] = ['woodwork', 'hunting', 'fishing', 'stonework', 'cooking', 'herbalism', 'weaving'];
 
 export function createWorld(seed: number): World {
-  const scene = buildTestScene(seed);
+  const scene = buildWorld(seed);
   const rng = new Rng(subSeed(seed, 10));
   const villagers: Villager[] = [];
   const c = scene.camp.center;
@@ -136,7 +147,10 @@ export function createWorld(seed: number): World {
     props: scene.props,
     camp: scene.camp,
     flow: scene.flow,
-    hexes: buildHexResources(seed, scene.terrain, scene.flow, scene.props),
+    river: scene.river,
+    lake: scene.lake,
+    biome: scene.biome,
+    hexes: buildHexResources(seed, scene.terrain, scene.biome),
     nodes: buildNodes(seed, scene.props),
     // What is left of the winter store: spring is lean until the berries and grain come.
     stockpile: { 'dried-meat': 14, 'dried-fruit': 8, nuts: 12, hardwood: 6, stone: 4, flint: 2 },
@@ -154,16 +168,24 @@ export function createWorld(seed: number): World {
     rosterVersion: 0,
     roadsVersion: 0,
     roadTimer: 0,
+    slowTimer: 0,
     events: [],
     nav: new NavGrid(scene.terrain),
     waterNav: new NavGrid(scene.terrain, 'water'),
+    walkField: new Float32Array(0),
     voyages: [],
     villagers,
     rng,
   };
   // The camp's tents are the town's first homes.
   foundTown(world);
+  world.walkField = world.nav.distanceField(world.camp.center.x, world.camp.center.z);
   return world;
+}
+
+/** Walking cost from the town centre to a point (Infinity if too far or unreachable). */
+export function walkCost(world: World, x: number, z: number): number {
+  return world.nav.fieldAt(world.walkField, x, z);
 }
 
 /** Grant every discovery and a canoe and airship (debug and showcase). */
@@ -187,7 +209,13 @@ export function tick(world: World, dt: number): void {
   for (let i = 0; i < world.villagers.length; i++) stepVillager(world, world.villagers[i], dt);
   const watchers = world.villagers.filter((v) => v.activity !== 'sleeping').map((v) => ({ x: v.x, z: v.z, stealth: v.task?.kind === 'gather' && v.task.stage === 'stalking' ? 0.6 : 0 }));
   stepHerds(world.herds, world.terrain, watchers, season, world.rng, dt);
-  regrowResources(world.nodes, season, dt);
+  // Slow processes (plants regrowing, paths fading) run in batches every few seconds.
+  world.slowTimer += dt;
+  if (world.slowTimer >= 5) {
+    regrowResources(world.nodes, season, world.slowTimer);
+    world.nav.regrow(world.slowTimer);
+    world.slowTimer = 0;
+  }
   spoilFood(world, season, dt);
   supplySites(world);
   planTown(world, materialNeeds(world), dt);
@@ -198,5 +226,4 @@ export function tick(world: World, dt: number): void {
     world.roadTimer = 30;
     growRoads(world);
   }
-  world.nav.regrow(dt);
 }

@@ -16,7 +16,7 @@ import { LINE_BY_ID, LINES, ROAD_TIERS, facilitiesAt, type Line, type Site, type
 import { currentEra, knows, logEvent } from './discovery';
 import { HEX_SIZE, hexKey, hexToWorld, worldToHex as worldToHexLocal } from './hex';
 import { calendar } from './time';
-import type { Villager, World } from './world';
+import { walkCost, type Villager, type World } from './world';
 
 /** Can the town get hold of this item: in store, gatherable, or makeable with what it has? */
 export function obtainable(world: World, id: string, need = 1): boolean {
@@ -213,7 +213,7 @@ export function findSite(world: World, l: Line, model: string): { x: number; z: 
       }
       if (!clearAt(world, x, z, r)) continue;
       // Villagers must be able to walk there from the town.
-      if (!world.nav.findPath(camp.x, camp.z, x, z)) continue;
+      if (walkCost(world, x, z) > 110) continue;
       // Face the town centre (or the water, for waterside buildings).
       const face = l.site === 'water' ? waterDirection(world, x, z) : Math.atan2(camp.x - x, camp.z - z);
       return { x, z, rot: face, hex: key };
@@ -444,6 +444,8 @@ export function dailyTown(world: World, food: number): void {
   const day = calendar(world.clock.totalSeconds).dayIndex;
   if (day === world.lastTownDay) return;
   world.lastTownDay = day;
+  // Roads and paths change how far things are: refresh the walking map.
+  world.walkField = world.nav.distanceField(world.camp.center.x, world.camp.center.z);
   for (const s of world.structures) if (s.animals > 0 && s.animals < 12) s.animals += 1;
   homeLife(world);
   const people = world.villagers.length;
@@ -466,7 +468,16 @@ export function addNewcomer(world: World, at?: { x: number; z: number }): Villag
   // They walk in from the edge of the valley.
   const half = world.terrain.size / 2 - 8;
   const a = rng.next() * Math.PI * 2;
-  const spot = at ?? world.nav.nearestPassable(Math.cos(a) * half, Math.sin(a) * half) ?? { x: world.camp.center.x, z: world.camp.center.z };
+  // They walk in from somewhere within reach of the town.
+  let spot = at ?? null;
+  for (let k = 0; !spot && k < 40; k++) {
+    const r = 60 + rng.next() * 80;
+    const b = a + k;
+    const p = world.nav.nearestPassable(world.camp.center.x + Math.cos(b) * r, world.camp.center.z + Math.sin(b) * r);
+    if (p && walkCost(world, p.x, p.z) < 100) spot = p;
+  }
+  spot ??= { x: world.camp.center.x, z: world.camp.center.z };
+  void half;
   const id = world.villagers.reduce((m, v) => Math.max(m, v.id), -1) + 1;
   const v: Villager = {
     id, name, passion: rng.pick(PASSIONS), talent: rng.pick(PASSIONS), prodigy: rng.next() < 0.08, look: id % 6, x: spot.x, z: spot.z, heading: 0, vx: 0, vz: 0,

@@ -3,6 +3,7 @@
 // range can feed, and can be hunted out. A herd that dies out leaves its range empty until a
 // few animals wander in from elsewhere, days later.
 
+import { ENVIRONMENT_BY_ID, type EnvironmentId } from './data/environments';
 import { FAUNA, FAUNA_BY_ID, type AnimalSpecies } from './data/fauna';
 import { Rng, subSeed } from './rng';
 import type { Heightfield } from './terrain';
@@ -45,37 +46,32 @@ function okFor(sp: AnimalSpecies, terrain: Heightfield, x: number, z: number): b
   return depth < -0.25 && terrain.slope(x, z) < 1.1;
 }
 
-/** Place the valley's wild animals: herds where their kind of land is. */
-export function spawnHerds(seed: number, terrain: Heightfield, camp: { x: number; z: number }, forestAt: (x: number, z: number) => number): Herd[] {
+/** Place the world's wild animals: herds of each species where its environments are. */
+export function spawnHerdsIn(seed: number, terrain: Heightfield, camp: { x: number; z: number }, envAt: (x: number, z: number) => EnvironmentId): Herd[] {
   const rng = new Rng(subSeed(seed, 21));
   const herds: Herd[] = [];
   const half = terrain.size / 2 - 10;
-  const place = (species: string, want: number, test: (x: number, z: number) => boolean, minCamp: number) => {
-    const sp = FAUNA_BY_ID.get(species)!;
-    for (let n = 0, tries = 0; n < want && tries < 6000; tries++) {
-      const x = rng.range(-half, half);
-      const z = rng.range(-half, half);
-      if (Math.hypot(x - camp.x, z - camp.z) < minCamp) continue;
-      if (!okFor(sp, terrain, x, z) || !test(x, z)) continue;
-      if (herds.some((h) => h.species === species && Math.hypot(h.x - x, h.z - z) < 40)) continue;
+  const spacing = (sp: AnimalSpecies) => (sp.movement === 'water' ? 35 : 50);
+  for (let tries = 0; tries < 70000 && herds.length < 120; tries++) {
+    const x = rng.range(-half, half);
+    const z = rng.range(-half, half);
+    const env = ENVIRONMENT_BY_ID.get(envAt(x, z))!;
+    for (const [id, density] of Object.entries(env.fauna)) {
+      const sp = FAUNA_BY_ID.get(id)!;
+      if (sp.movement === 'fixed' || rng.next() > density * 0.08) continue;
+      // Keep wary and dangerous animals away from the camp at the start.
+      if (sp.movement === 'land' && Math.hypot(x - camp.x, z - camp.z) < (sp.dangerous ? 90 : 40)) continue;
+      if (!okFor(sp, terrain, x, z)) continue;
+      if (herds.some((h) => h.species === id && Math.hypot(h.x - x, h.z - z) < spacing(sp))) continue;
       const count = Math.max(1, Math.round(sp.herd * rng.range(0.7, 1.2)));
       herds.push({
-        id: herds.length, species, x, z, home: { x, z }, range: sp.movement === 'water' ? 22 : 34,
+        id: herds.length, species: id, x, z, home: { x, z }, range: sp.movement === 'water' ? 22 : 34,
         count, max: Math.ceil(sp.herd * 1.4), heading: rng.next() * Math.PI * 2, vx: 0, vz: 0,
         state: HERD_GRAZE, target: { x, z }, timer: rng.range(2, 20), returnIn: 0,
       });
-      n++;
+      break;
     }
-  };
-  const meadow = (x: number, z: number) => forestAt(x, z) < 0.5 && terrain.sample(x, z) - terrain.waterLevel > 1.5;
-  const edge = (x: number, z: number) => { const f = forestAt(x, z); return f > 0.4 && f < 0.75; };
-  const wood = (x: number, z: number) => forestAt(x, z) > 0.6;
-  place('red-deer', 2, edge, 45);
-  place('wild-boar', 2, wood, 50);
-  place('hare', 4, meadow, 30);
-  place('wild-goat', 1, (x, z) => terrain.sample(x, z) > 26, 60);
-  place('wild-fowl', 2, () => true, 25);
-  place('river-fish', 5, () => true, 0);
+  }
   return herds;
 }
 

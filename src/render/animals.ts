@@ -141,6 +141,63 @@ function fish(): Body {
   return { body, head: tail, headPivot: V(0, 0, -0.2), legSockets: [], gait: 'fish', scale: 1 };
 }
 
+function bear(): Body {
+  const coat = fur('#4a3424', '#6a5038');
+  const torso = part(ellipsoid(0.42, 0.45, 0.78).translate(0, 0.85, 0), coat);
+  const hump = part(ellipsoid(0.3, 0.25, 0.3).translate(0, 1.2, 0.35), coat);
+  const head = part(ellipsoid(0.22, 0.22, 0.26).translate(0, 1.0, 0.95), coat);
+  const snout = part(ellipsoid(0.11, 0.1, 0.14).translate(0, 0.94, 1.18), color('#6a5442'));
+  const nose = part(ellipsoid(0.05, 0.04, 0.03).translate(0, 0.97, 1.31), color('#1a1410'));
+  const ears = [-1, 1].map((s) => part(ellipsoid(0.07, 0.07, 0.04).translate(s * 0.15, 1.2, 0.88), coat));
+  const leg = part(limb(V(0, 0, 0), V(0, -0.55, 0.03), 0.13, 0.11, 7), coat);
+  return { body: merge([torso, hump]), head: merge([head, snout, nose, ...ears]), headPivot: V(0, 1.05, 0.6), leg, legSockets: [V(-0.24, 0.55, 0.45), V(0.24, 0.55, 0.45), V(-0.24, 0.55, -0.5), V(0.24, 0.55, -0.5)], gait: 'walk', scale: 1 };
+}
+
+function fox(): Body {
+  const coat = fur('#b8582a', '#efe6d8');
+  const torso = part(ellipsoid(0.12, 0.13, 0.32).translate(0, 0.36, 0), coat);
+  const tail = part(ellipsoid(0.08, 0.08, 0.3).rotateX(0.5).translate(0, 0.32, -0.45), (p) => (p.z < -0.62 ? color('#f2ece0') : color('#b8582a')));
+  const head = part(ellipsoid(0.09, 0.08, 0.1).translate(0, 0.46, 0.34), coat);
+  const snout = part(ellipsoid(0.04, 0.035, 0.08).translate(0, 0.43, 0.45), color('#efe6d8'));
+  const ears = [-1, 1].map((s) => part(new THREE.ConeGeometry(0.035, 0.09, 4).translate(s * 0.05, 0.56, 0.32), coat));
+  const leg = part(limb(V(0, 0, 0), V(0, -0.27, 0.01), 0.025, 0.02, 4), color('#2a1e16'));
+  return { body: merge([torso, tail]), head: merge([head, snout, ...ears]), headPivot: V(0, 0.42, 0.22), leg, legSockets: [V(-0.06, 0.27, 0.2), V(0.06, 0.27, 0.2), V(-0.06, 0.27, -0.2), V(0.06, 0.27, -0.2)], gait: 'walk', scale: 1 };
+}
+
+function seal(): Body {
+  const coat = fur('#5a5650', '#8a847a');
+  const body = part(ellipsoid(0.32, 0.26, 0.85).translate(0, 0.25, 0), coat);
+  const tail = part(ellipsoid(0.22, 0.05, 0.16).translate(0, 0.1, -0.9), coat);
+  const flippers = [-1, 1].map((s) => part(ellipsoid(0.16, 0.04, 0.1).rotateY(s * 0.6).translate(s * 0.32, 0.08, 0.3), coat));
+  const head = part(ellipsoid(0.17, 0.16, 0.2).translate(0, 0.45, 0.82), coat);
+  const nose = part(ellipsoid(0.05, 0.04, 0.03).translate(0, 0.45, 1.01), color('#1a1814'));
+  return { body: merge([body, tail, ...flippers]), head: merge([head, nose]), headPivot: V(0, 0.35, 0.6), legSockets: [], gait: 'hop', scale: 1 };
+}
+
+function aurochs(): Body {
+  const coat = fur('#2e2620', '#5a4a3c');
+  const torso = part(ellipsoid(0.42, 0.48, 0.95).translate(0, 1.25, 0), coat);
+  const hump = part(ellipsoid(0.3, 0.3, 0.4).translate(0, 1.6, 0.4), coat);
+  const tail = part(limb(V(0, 1.4, -0.92), V(0, 0.8, -1.02), 0.04, 0.03, 4), coat);
+  const neck = part(limb(V(0, 1.4, 0.7), V(0, 1.3, 1.05), 0.3, 0.22, 8), coat);
+  const head = part(ellipsoid(0.2, 0.22, 0.32).rotateX(0.3).translate(0, 1.2, 1.25), coat);
+  const muzzle = part(ellipsoid(0.13, 0.11, 0.08).translate(0, 1.06, 1.5), color('#c8b8a0'));
+  const horn = color('#e8dcc0');
+  const horns = [-1, 1].map((s) => merge([part(limb(V(s * 0.16, 1.42, 1.2), V(s * 0.42, 1.55, 1.3), 0.05, 0.035, 5), horn), part(limb(V(s * 0.42, 1.55, 1.3), V(s * 0.46, 1.78, 1.45), 0.035, 0.012, 5), horn)]));
+  const leg = merge([part(limb(V(0, 0, 0), V(0, -0.5, 0.03), 0.11, 0.08, 6), coat), part(limb(V(0, -0.5, 0.03), V(0, -0.95, 0), 0.06, 0.055, 5), color('#2a221c'))]);
+  return { body: merge([torso, hump, tail]), head: merge([neck, head, muzzle, ...horns]), headPivot: V(0, 1.4, 0.7), leg, legSockets: [V(-0.24, 0.95, 0.55), V(0.24, 0.95, 0.55), V(-0.24, 0.95, -0.6), V(0.24, 0.95, -0.6)], gait: 'walk', scale: 1 };
+}
+
+function junglefowl(cock: boolean): Body {
+  const body = part(ellipsoid(0.12, 0.13, 0.17).translate(0, 0.3, 0), (p) => (cock && p.y > 0.33 ? color('#c8622a') : color(cock ? '#2a3a2a' : '#8a6a44')));
+  const tail = part(ellipsoid(0.03, cock ? 0.18 : 0.08, 0.12).rotateX(-0.6).translate(0, 0.42, -0.18), color(cock ? '#1e3a2e' : '#7a5a3a'));
+  const head = part(ellipsoid(0.05, 0.06, 0.06).translate(0, 0.5, 0.15), color(cock ? '#c8622a' : '#8a6a44'));
+  const comb = part(ellipsoid(0.015, 0.04, 0.04).translate(0, 0.57, 0.15), color('#c82a2a'));
+  const beak = part(new THREE.ConeGeometry(0.018, 0.05, 4).rotateX(Math.PI / 2).translate(0, 0.49, 0.22), color('#d9a830'));
+  const leg = part(limb(V(0, 0, 0), V(0, -0.2, 0.02), 0.012, 0.01, 3), color('#c8a040'));
+  return { body: merge([body, tail]), head: merge([head, comb, beak]), headPivot: V(0, 0.38, 0.1), leg, legSockets: [V(-0.05, 0.2, 0), V(0.05, 0.2, 0)], gait: 'walk', scale: 1 };
+}
+
 function makeBody(species: string, index: number): Body | null {
   switch (species) {
     case 'red-deer':
@@ -149,6 +206,16 @@ function makeBody(species: string, index: number): Body | null {
       return { ...deer(index === 0), scale: 1.35 };
     case 'wild-boar':
       return boar();
+    case 'bear':
+      return bear();
+    case 'fox':
+      return fox();
+    case 'seal':
+      return seal();
+    case 'aurochs':
+      return aurochs();
+    case 'junglefowl':
+      return junglefowl(index === 0);
     case 'hare':
       return hare();
     case 'wild-goat':

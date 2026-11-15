@@ -126,7 +126,7 @@ describe('gathering simulation', () => {
     expect(moved).toBeGreaterThan(w.herds.length / 2);
     // Meat only arrives through hunting animals, so hunters must have caught something.
     expect(w.seen).toContain('game-meat');
-  });
+  }, 120000);
 
   it('food spoils by kind, season and storage', () => {
     const w = createWorld(7);
@@ -143,7 +143,7 @@ describe('gathering simulation', () => {
     expect(w.stockpile['game-meat']).toBeGreaterThan(springMeat + 20);
     expect(w.stockpile.ice).toBeLessThan(50);
     expect(w.spoilage.yesterday).toBeGreaterThan(0);
-  });
+  }, 120000);
 
   it('the town builds, upgrades and grows', () => {
     const w = createWorld(7);

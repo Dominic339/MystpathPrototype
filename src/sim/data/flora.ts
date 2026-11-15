@@ -35,13 +35,13 @@ export const FLORA: readonly PlantSpecies[] = [
   p('oak', 'Oak', 'oak', { hardwood: 3, nuts: 2 }, 2400, ALL, 'orchards', { nuts: AUTUMN }),
   p('birch', 'Birch', 'birch', { hardwood: 3 }, 2400, ALL),
   p('pine', 'Pine', 'pine', { softwood: 3, resin: 2 }, 2400, ALL),
-  p('tropical-hardwood', 'Mahogany', 'oak', { hardwood: 4 }, 2400, ALL),
+  p('tropical-hardwood', 'Mahogany', 'tropical', { hardwood: 4 }, 2400, ALL),
   p('cork-oak', 'Cork oak', 'oak', { hardwood: 2, cork: 2 }, 4800, ALL),
-  p('rubber-tree', 'Rubber tree', 'oak', { hardwood: 2, latex: 2 }, 3600, ALL),
+  p('rubber-tree', 'Rubber tree', 'tropical', { hardwood: 2, latex: 2 }, 3600, ALL),
   p('wild-apple', 'Wild apple', 'apple', { hardwood: 1, 'wild-fruit': 5 }, 2400, ALL, 'orchards', { 'wild-fruit': FRUITING }),
   p('hazel', 'Hazel', 'hazel', { nuts: 4, softwood: 1 }, 2400, ALL, 'orchards', { nuts: AUTUMN }),
-  p('bamboo', 'Bamboo', 'reeds', { bamboo: 4 }, 1800, GROWING),
-  p('spirit-tree', 'Spirit tree', 'oak', { 'spirit-wood': 0.5, hardwood: 2 }, 9600, ALL, 'sacred-groves'),
+  p('bamboo', 'Bamboo', 'bamboo', { bamboo: 4 }, 1800, GROWING),
+  p('spirit-tree', 'Spirit tree', 'spirit', { 'spirit-wood': 0.5, hardwood: 2 }, 9600, ALL, 'sacred-groves'),
 
   // Bushes and small plants.
   p('berry-bush', 'Berry bush', 'berrybush', { berries: 6 }, 2400, FRUITING, 'orchards'),
@@ -50,14 +50,16 @@ export const FLORA: readonly PlantSpecies[] = [
   p('wild-tubers', 'Wild tubers', 'tubers', { roots: 3 }, 3000, [0.6, 1, 1, 0], 'agriculture'),
   p('mushrooms', 'Mushroom ring', 'mushrooms', { mushrooms: 3 }, 2400, [0.6, 0.2, 1, 0], 'mushroom-cultivation'),
   p('wild-herbs', 'Wild herb patch', 'flowers', { herbs: 2, 'dye-plants': 1 }, 2400, GROWING, 'herb-gardening'),
+  p('prickly-pear', 'Prickly pear', 'cactus', { 'wild-fruit': 2 }, 3600, [0.3, 1, 0.6, 0]),
+  p('desert-scrub', 'Desert scrub', 'scrub', { softwood: 1 }, 3600, ALL),
   p('spice-vine', 'Wild pepper vine', 'bush', { spices: 1 }, 4800, FRUITING, 'spice-cultivation'),
 
   // Fibres and wetland plants.
   p('reeds', 'Reeds', 'reeds', { reeds: 6 }, 2400, GROWING),
   p('wild-flax', 'Wild flax', 'flax', { flax: 3 }, 3000, [0.3, 1, 0.6, 0], 'fibre-crops'),
   p('wild-hemp', 'Wild hemp', 'flax', { hemp: 3 }, 3000, [0.3, 1, 0.6, 0], 'fibre-crops'),
-  p('wild-cotton', 'Wild cotton', 'bush', { cotton: 3 }, 3600, [0, 0.5, 1, 0], 'fibre-crops'),
-  p('seaweed-bed', 'Seaweed bed', 'reeds', { seaweed: 4 }, 2400, ALL),
+  p('wild-cotton', 'Wild cotton', 'cotton', { cotton: 3 }, 3600, [0, 0.5, 1, 0], 'fibre-crops'),
+  p('seaweed-bed', 'Seaweed bed', 'seaweed', { seaweed: 4 }, 2400, ALL),
 ];
 
 export const FLORA_BY_ID: ReadonlyMap<string, PlantSpecies> = new Map(FLORA.map((x) => [x.id, x]));

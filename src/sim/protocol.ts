@@ -99,6 +99,8 @@ export type FromSim =
       flow: { res: number; size: number; data: Float32Array };
       /** Navigable route for boats: river centreline and the lake it feeds. */
       waterway: { river: [number, number][]; lake: { x: number; z: number; r: number } };
+      /** Environment index per cell (see worldgen BIOME_RES). */
+      biome: Uint8Array;
       villagers: { id: number; name: string; passion: string; look: number }[];
       herds: { species: string; max: number }[];
       navSize: number;

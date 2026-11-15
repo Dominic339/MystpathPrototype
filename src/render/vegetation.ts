@@ -500,6 +500,131 @@ function shellfish(seed: number): THREE.BufferGeometry {
   return merge(parts);
 }
 
+/** A tall rainforest tree: buttress roots, a straight trunk and a broad, flat crown. */
+function tropical(seed: number): PlantGeo {
+  const parts: THREE.BufferGeometry[] = [];
+  const h = rand(seed, 1, 8, 11);
+  const bark: BarkPalette = { dark: color('#5a5040'), light: color('#9a8e74'), knot: color('#3a3226') };
+  parts.push(limbTube({ points: [V(0, -0.4, 0), V(0.2, h * 0.5, 0.1), V(0, h, 0)], r0: 0.4, r1: 0.22, flare: 1.2 }, bark, 10, 10));
+  for (let k = 0; k < 5; k++) {
+    const a = (k / 5) * Math.PI * 2 + rand(seed, 2, 0, 1);
+    const g = new THREE.BoxGeometry(0.12, 1.4, 1.2);
+    g.translate(0, 0.5, 0.75);
+    g.rotateY(a);
+    parts.push(part(g, bark.dark));
+  }
+  const lobes: Lobe[] = [];
+  for (let k = 0; k < 6; k++) {
+    const a = (k / 6) * Math.PI * 2 + rand(seed, 3, 0, 1);
+    const end = V(Math.cos(a) * 2.6, h + rand(seed, 4, 0.2, 1.0, k), Math.sin(a) * 2.6);
+    parts.push(limbTube({ points: [V(0, h - 0.5, 0), end], r0: 0.14, r1: 0.05 }, bark, 5, 5));
+    lobes.push({ center: end.clone().add(V(0, 0.4, 0)), radius: rand(seed, 5, 1.4, 1.9, k) });
+  }
+  lobes.push({ center: V(0, h + 0.9, 0), radius: 2.1 });
+  const leaves = canopyMass(lobes.map((l) => ({ ...l, center: l.center.clone().multiply(V(1, 1, 1)) })), seed, { deep: color('#1c3a18'), base: color('#2f6a26'), sun: color('#6fa83c') }, 4);
+  leaves.scale(1, 0.6, 1);
+  leaves.translate(0, h * 0.4, 0);
+  return { wood: merge(parts), leaves };
+}
+
+/** A spirit tree: pale silver bark and a crown of faintly glowing blue-white leaves. */
+function spiritTree(seed: number): PlantGeo {
+  const parts: THREE.BufferGeometry[] = [];
+  const bark: BarkPalette = { dark: color('#8a8e98'), light: color('#e2e4ea'), knot: color('#5a5e6a') };
+  const h = rand(seed, 1, 5, 6.5);
+  parts.push(limbTube({ points: [V(0, -0.3, 0), V(0.5, h * 0.4, -0.2), V(-0.3, h * 0.75, 0.2), V(0, h, 0)], r0: 0.45, r1: 0.18, flare: 1.4, knots: [{ t: 0.4, angle: 1, size: 0.12 }] }, bark, 9, 12));
+  const lobes: Lobe[] = [];
+  for (let k = 0; k < 5; k++) {
+    const a = (k / 5) * Math.PI * 2;
+    const end = V(Math.cos(a) * 2.2, h + 0.4, Math.sin(a) * 2.2);
+    parts.push(limbTube({ points: [V(0, h * 0.75, 0), end], r0: 0.14, r1: 0.05 }, bark, 5, 6));
+    lobes.push({ center: end.clone().add(V(0, 0.4, 0)), radius: 1.3 });
+  }
+  lobes.push({ center: V(0, h + 1.2, 0), radius: 1.6 });
+  return { wood: merge(parts), leaves: canopyMass(lobes, seed, { deep: color('#4a5a8a'), base: color('#8aa4d8'), sun: color('#d6e6ff') }, 4) };
+}
+
+/** A clump of bamboo: segmented green culms with feathery leaves. */
+function bamboo(seed: number): PlantGeo {
+  const parts: THREE.BufferGeometry[] = [];
+  const lobes: Lobe[] = [];
+  for (let k = 0; k < 9; k++) {
+    const a = hash01(seed, 1, k) * Math.PI * 2;
+    const r = Math.sqrt(hash01(seed, 2, k)) * 0.8;
+    const h = 4 + hash01(seed, 3, k) * 3;
+    const base = V(Math.cos(a) * r, -0.1, Math.sin(a) * r);
+    const top = V(Math.cos(a) * (r + 0.5), h, Math.sin(a) * (r + 0.5));
+    parts.push(part(limb(base, top, 0.07, 0.05, 6), (p) => (Math.abs(Math.sin(p.y * 6)) < 0.08 ? color('#7a8a3a') : color('#5f8a34'))));
+    lobes.push({ center: top.clone().add(V(0, -0.6, 0)), radius: 0.7 });
+  }
+  return { wood: merge(parts), leaves: canopyMass(lobes, seed, { deep: color('#2a4a1c'), base: color('#4f7f2c'), sun: color('#9aba52') }, 3) };
+}
+
+/** Wild cotton: a low bush dotted with white bolls. */
+function cotton(seed: number): PlantGeo {
+  const b = bush(seed, false);
+  const parts: THREE.BufferGeometry[] = b.wood ? [b.wood] : [];
+  for (let k = 0; k < 18; k++) {
+    const a = hash01(seed, 1, k) * Math.PI * 2;
+    const g = new THREE.IcosahedronGeometry(0.08, 0);
+    g.translate(Math.cos(a) * (0.5 + hash01(seed, 2, k) * 0.4), 0.6 + hash01(seed, 3, k) * 0.6, Math.sin(a) * (0.5 + hash01(seed, 2, k) * 0.4));
+    parts.push(part(g, color('#f2efe6')));
+  }
+  return { wood: merge(parts), leaves: b.leaves };
+}
+
+/** Kelp and seaweed swaying in the shallows. */
+function seaweed(seed: number): THREE.BufferGeometry {
+  const parts: THREE.BufferGeometry[] = [];
+  for (let k = 0; k < 10; k++) {
+    const a = hash01(seed, 1, k) * Math.PI * 2;
+    const r = hash01(seed, 2, k) * 0.8;
+    const h = 0.6 + hash01(seed, 3, k) * 0.8;
+    const blade = new THREE.PlaneGeometry(0.12, h, 1, 4);
+    blade.translate(0, h / 2, 0);
+    blade.rotateY(a);
+    blade.translate(Math.cos(a) * r, 0, Math.sin(a) * r);
+    parts.push(part(blade, (p) => mix(color('#3a4a1c'), color('#7a7a2a'), p.y / 1.4)));
+  }
+  return merge(parts);
+}
+
+/** Prickly pear: flat green pads with red fruit. */
+function cactus(seed: number): THREE.BufferGeometry {
+  const parts: THREE.BufferGeometry[] = [];
+  const pad = (x: number, y: number, z: number, rot: number, tilt: number, s: number) => {
+    const g = new THREE.SphereGeometry(0.32 * s, 9, 7);
+    g.scale(1, 1.25, 0.28);
+    g.rotateZ(tilt);
+    g.rotateY(rot);
+    g.translate(x, y, z);
+    parts.push(part(g, (p) => jitter(color('#5a7a3a'), 0.08, p.x * 9, p.y * 9, p.z * 9)));
+    return V(x + Math.sin(tilt) * -0.3 * s, y + Math.cos(tilt) * 0.38 * s, z);
+  };
+  const top = pad(0, 0.35, 0, hash01(seed, 1) * 3, 0, 1);
+  for (let k = 0; k < 3; k++) {
+    const t = pad(top.x + (k - 1) * 0.25, top.y + 0.2, top.z, hash01(seed, 2, k) * 3, (k - 1) * 0.5, 0.8);
+    const f = new THREE.SphereGeometry(0.06, 6, 4);
+    f.translate(t.x, t.y + 0.05, t.z);
+    parts.push(part(f, color('#b8303a')));
+  }
+  return merge(parts);
+}
+
+/** Dry desert scrub: low, twiggy and grey-green. */
+function scrub(seed: number): THREE.BufferGeometry {
+  const parts: THREE.BufferGeometry[] = [];
+  for (let k = 0; k < 14; k++) {
+    const a = hash01(seed, 1, k) * Math.PI * 2;
+    const len = 0.4 + hash01(seed, 2, k) * 0.4;
+    parts.push(part(limb(V(0, 0, 0), V(Math.cos(a) * len, 0.3 + hash01(seed, 3, k) * 0.4, Math.sin(a) * len), 0.025, 0.01, 3), color('#6a5a44')));
+    const tuft = new THREE.IcosahedronGeometry(0.14, 0);
+    tuft.translate(Math.cos(a) * len, 0.35 + hash01(seed, 3, k) * 0.4, Math.sin(a) * len);
+    parts.push(part(tuft, (p) => jitter(color('#8a9070'), 0.12, p.x * 7, p.y * 7, p.z * 7)));
+  }
+  return merge(parts);
+}
+
 const VARIANTS = 3;
 
 interface BuiltKind {
@@ -532,6 +657,13 @@ function buildKind(kind: PropKind, v: number): BuiltKind {
     case 'flowers': return { geo: { wood: flowers(seed) }, sway: 0.25, flat: false, shadow: false, density: 1 };
     case 'beehive': return { geo: { wood: beehive(seed) }, sway: 0, flat: false, shadow: true, density: 1 };
     case 'nest': return { geo: { wood: nest(seed) }, sway: 0, flat: false, shadow: false, density: 1 };
+    case 'tropical': return { geo: tropical(seed), sway: 0.0012, flat: false, shadow: true, density: 1.05 };
+    case 'spirit': return { geo: spiritTree(seed), sway: 0.0015, flat: false, shadow: true, density: 0.95 };
+    case 'bamboo': return { geo: bamboo(seed), sway: 0.006, flat: false, shadow: true, density: 0.9 };
+    case 'cotton': return { geo: cotton(seed), sway: 0.02, flat: false, shadow: true, density: 1.1 };
+    case 'seaweed': return { geo: { wood: seaweed(seed) }, sway: 0.15, flat: false, shadow: false, density: 1 };
+    case 'cactus': return { geo: { wood: cactus(seed) }, sway: 0, flat: false, shadow: true, density: 1 };
+    case 'scrub': return { geo: { wood: scrub(seed) }, sway: 0.03, flat: false, shadow: false, density: 1 };
   }
 }
 
@@ -559,7 +691,7 @@ export function buildVegetation(props: PropInstance[], terrain: Heightfield): TH
       const mat = natureMaterial({
         sway: built.sway,
         flat: built.flat,
-        side: kind === 'reeds' || kind === 'flax' || kind === 'mushrooms' || kind === 'grain' ? THREE.DoubleSide : THREE.FrontSide,
+        side: ['reeds', 'flax', 'mushrooms', 'grain', 'seaweed'].includes(kind) ? THREE.DoubleSide : THREE.FrontSide,
         grain: built.flat ? 0.18 : 0.12,
         grainScale: 1.6,
       });
@@ -584,7 +716,7 @@ export function buildVegetation(props: PropInstance[], terrain: Heightfield): TH
       m.compose(t, q, s);
       // Each plant gets its own tint: some greener, some more olive or autumn-touched.
       const r = hash01(31, i, kind.length);
-      const leafy = kind === 'oak' || kind === 'birch' || kind === 'pine' || kind === 'bush' || kind === 'berrybush' || kind === 'apple' || kind === 'hazel';
+      const leafy = ['oak', 'birch', 'pine', 'bush', 'berrybush', 'apple', 'hazel', 'tropical', 'spirit', 'bamboo', 'cotton'].includes(kind);
       const tint = leafy
         ? new THREE.Color(1, 1, 1).multiplyScalar(0.82 + r * 0.32).lerp(new THREE.Color(1.15, 1.05, 0.7), hash01(32, i) * 0.35)
         : new THREE.Color(1, 1, 1).multiplyScalar(0.85 + r * 0.25);

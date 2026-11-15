@@ -7,10 +7,10 @@ import { ENVIRONMENT_BY_ID, type EnvironmentId } from './data/environments';
 import { FAUNA, FAUNA_BY_ID } from './data/fauna';
 import { FLORA_BY_ID } from './data/flora';
 import { MATERIAL_BY_ID, type Rarity } from './data/materials';
-import { HEX_SIZE, hexesInRadius, hexKey, hexToWorld, type Hex } from './hex';
+import { HEX_SIZE, hexesInRadius, hexToWorld, type Hex } from './hex';
 import { hash01 } from './rng';
 import type { Heightfield } from './terrain';
-import type { FlowField } from './testScene';
+import { envAtPoint } from './worldgen';
 import type { PropInstance, PropKind } from './world';
 
 export interface HexResources {
@@ -42,54 +42,28 @@ export interface ResourceNode {
 const RARITY_SCALE: Record<Rarity, number> = { common: 1, uncommon: 0.6, rare: 0.3, 'very-rare': 0.12 };
 
 /** Decide a hex's environment from the ground under it. */
-export function classifyHex(h: Hex, terrain: Heightfield, flow: FlowField, treeDensity: number): EnvironmentId {
+/** A hex's environment: the most common one across its area. */
+export function classifyHex(h: Hex, biome: Uint8Array): EnvironmentId {
   const c = hexToWorld(h);
-  let water = 0;
-  let wet = 0;
-  let maxH = -Infinity;
-  let slope = 0;
-  const samples = 7;
-  for (let k = 0; k < samples; k++) {
-    const a = (k / samples) * Math.PI * 2;
-    const rad = k === 0 ? 0 : HEX_SIZE * 0.7;
-    const x = c.x + Math.cos(a) * rad;
-    const z = c.z + Math.sin(a) * rad;
-    const ht = terrain.sample(x, z);
-    if (ht < terrain.waterLevel) water++;
-    else if (ht < terrain.waterLevel + 1.0) wet++;
-    maxH = Math.max(maxH, ht);
-    slope += terrain.slope(x, z);
+  const votes = new Map<EnvironmentId, number>();
+  for (let k = 0; k < 7; k++) {
+    const a = (k / 7) * Math.PI * 2;
+    const rad = k === 0 ? 0 : HEX_SIZE * 0.6;
+    const e = envAtPoint(biome, c.x + Math.cos(a) * rad, c.z + Math.sin(a) * rad);
+    votes.set(e, (votes.get(e) ?? 0) + (k === 0 ? 1.5 : 1));
   }
-  slope /= samples;
-  if (water >= 4) {
-    const fi = Math.round((c.x / flow.size + 0.5) * (flow.res - 1));
-    const fj = Math.round((c.z / flow.size + 0.5) * (flow.res - 1));
-    const k = (Math.min(flow.res - 1, Math.max(0, fj)) * flow.res + Math.min(flow.res - 1, Math.max(0, fi))) * 2;
-    return Math.hypot(flow.data[k], flow.data[k + 1]) > 0.15 ? 'river' : 'lake';
-  }
-  if (water > 0 || wet >= 2) return 'riverbank';
-  if (maxH > 32 || slope > 0.85) return maxH > 40 ? 'mountains' : 'hills';
-  if (treeDensity > 2.5) return maxH > 14 ? 'conifer-forest' : 'temperate-forest';
-  if (maxH > 16) return 'hills';
-  return treeDensity > 0.8 ? 'temperate-forest' : 'meadow';
+  return [...votes.entries()].sort((a, b) => b[1] - a[1])[0][0];
 }
 
 /** Build the hex resource map for the playable area. */
-export function buildHexResources(seed: number, terrain: Heightfield, flow: FlowField, props: PropInstance[]): HexResources[] {
+export function buildHexResources(seed: number, terrain: Heightfield, biome: Uint8Array): HexResources[] {
   const radius = Math.floor(terrain.size / 2 / (HEX_SIZE * 1.5));
   const half = terrain.size / 2 - HEX_SIZE;
-  // Trees per hex, to tell forest from meadow.
-  const trees = new Map<string, number>();
-  for (const p of props) {
-    if (p.kind !== 'oak' && p.kind !== 'pine' && p.kind !== 'birch') continue;
-    const k = hexKey(worldHex(p.x, p.z));
-    trees.set(k, (trees.get(k) ?? 0) + 1);
-  }
   const out: HexResources[] = [];
   for (const h of hexesInRadius({ q: 0, r: 0 }, radius)) {
     const c = hexToWorld(h);
     if (Math.abs(c.x) > half || Math.abs(c.z) > half) continue;
-    const env = classifyHex(h, terrain, flow, trees.get(hexKey(h)) ?? 0);
+    const env = classifyHex(h, biome);
     const e = ENVIRONMENT_BY_ID.get(env)!;
     const ground: Record<string, number> = {};
     const below: Record<string, number> = {};
@@ -115,21 +89,6 @@ export function buildHexResources(seed: number, terrain: Heightfield, flow: Flow
   return out;
 }
 
-function worldHex(x: number, z: number): Hex {
-  const q = ((2 / 3) * x) / HEX_SIZE;
-  const r = ((-1 / 3) * x + (Math.sqrt(3) / 3) * z) / HEX_SIZE;
-  // Inline rounding to avoid a circular import.
-  const s = -q - r;
-  let rq = Math.round(q);
-  let rr = Math.round(r);
-  const rs = Math.round(s);
-  const dq = Math.abs(rq - q);
-  const dr = Math.abs(rr - r);
-  const ds = Math.abs(rs - s);
-  if (dq > dr && dq > ds) rq = -rr - rs;
-  else if (dr > ds) rr = -rq - rs;
-  return { q: rq + 0, r: rr + 0 };
-}
 
 /** Which species each prop model stands for. Bushes are split between berry bushes and thickets. */
 function speciesFor(kind: PropKind): { kind: NodeKind; species?: string } | null {
@@ -162,7 +121,7 @@ function speciesFor(kind: PropKind): { kind: NodeKind; species?: string } | null
 export function buildNodes(seed: number, props: PropInstance[]): ResourceNode[] {
   const nodes: ResourceNode[] = [];
   props.forEach((p, i) => {
-    const s = speciesFor(p.kind);
+    const s = p.species ? (FLORA_BY_ID.has(p.species) ? { kind: 'plant' as NodeKind, species: p.species } : { kind: 'fixed' as NodeKind, species: p.species }) : speciesFor(p.kind);
     if (!s) return;
     let stock: Record<string, number>;
     if (s.kind === 'ground') {

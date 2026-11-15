@@ -221,10 +221,10 @@ worker.onmessage = (e: MessageEvent<FromSim>) => {
     const t = msg.terrain;
     terrain = new Heightfield(t.res, t.size, t.heights, t.waterLevel);
     globalUniforms.uWorldSize.value = t.size;
-    const built = buildTerrain(terrain, msg.camp, msg.props);
+    const built = buildTerrain(terrain, msg.camp, msg.props, msg.biome);
     terrainMesh = built.mesh;
     scene.add(built.mesh);
-    scene.add(buildGrass(terrain, built.mesh, built.grassWeight, lowQuality ? 18000 : 48000));
+    scene.add(buildGrass(terrain, built.mesh, built.grassWeight, lowQuality ? 30000 : 90000));
     water = new WaterSystem(terrain, msg.flow);
     scene.add(water.mesh);
     // Canoes are drawn where fishers take them; idle ones lie moored at the landing.

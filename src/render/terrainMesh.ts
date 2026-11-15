@@ -8,6 +8,7 @@ import type { CampLayout, PropInstance } from '../sim/world';
 import { Noise2D } from '../sim/noise';
 import { color, mix } from './geom';
 import { globalUniforms } from './materials';
+import { envAtPoint } from '../sim/worldgen';
 
 const GRASS_LUSH = color('#4a6e2c');
 const GRASS_DRY = color('#8c8f4a');
@@ -22,13 +23,43 @@ const ROCK = color('#7d776e');
 const ROCK_DARK = color('#58534c');
 const SCREE = color('#958c7c');
 
+const SNOW = color('#e9eef3');
+type Ground = (x: number, z: number, h: number, slope: number, nv: number, nf: number) => { color: THREE.Color; amount: number; grass: number };
+
+/** How each environment paints the ground, and how much grass grows there. */
+const BIOME_GROUND: Partial<Record<string, Ground>> = {
+  desert: (x, z, _h, _s, nv) => {
+    const ripple = Math.sin(x * 0.9 + Math.sin(z * 0.2) * 3) * 0.5 + 0.5;
+    return { color: mix(color('#c9a470'), color('#e0c48e'), ripple * 0.5 + nv * 0.4), amount: 1, grass: 0.02 };
+  },
+  'dry-lake': (x, z, _h, _s, nv, nf) => {
+    const crack = Math.abs(Math.sin(x * 1.3 + nf * 4) * Math.sin(z * 1.3 + nv * 4)) < 0.06 ? 0.35 : 0;
+    return { color: mix(color('#ddd5c2'), color('#8a7e6a'), crack + nv * 0.1), amount: 1, grass: 0 };
+  },
+  coast: (_x, _z, _h, _s, nv) => ({ color: mix(color('#d6c39a'), color('#e6d6b0'), nv), amount: 0.95, grass: 0.08 }),
+  volcanic: (_x, _z, h, slope, nv, nf) => {
+    const sulphur = nf > 0.82 && h < 50 ? 0.6 : 0;
+    const c = mix(mix(color('#2c2826'), color('#4a403a'), nv), color('#c9b23a'), sulphur);
+    return { color: c, amount: 1, grass: slope < 0.3 && h < 15 ? 0.15 : 0 };
+  },
+  glacier: (_x, _z, _h, _s, nv) => ({ color: mix(color('#dfe8f0'), color('#b8cfe0'), nv * 0.6), amount: 1, grass: 0 }),
+  'snowy-hills': (_x, _z, _h, slope, nv) => ({ color: mix(SNOW, color('#8a8a86'), smoothstep(0.5, 1.1, slope) * 0.8 + nv * 0.1), amount: 0.9, grass: 0.05 }),
+  'chalk-hills': (_x, _z, _h, slope, nv, nf) => ({ color: mix(color('#7a8a44'), color('#e2ddcd'), smoothstep(0.35, 0.8, slope) * 0.8 + (nf > 0.8 ? 0.5 : 0)), amount: 0.6 + nv * 0.2, grass: 0.8 }),
+  swamp: (_x, _z, _h, _s, nv, nf) => ({ color: mix(color('#3c4228'), color('#5a5a34'), nv), amount: 0.85, grass: nf > 0.5 ? 0.6 : 0.2 }),
+  'tropical-forest': (_x, _z, _h, _s, nv) => ({ color: mix(color('#2a5a20'), color('#3f7a2a'), nv), amount: 0.75, grass: 1 }),
+  plains: (_x, _z, _h, _s, nv) => ({ color: mix(color('#8e8f48'), color('#a8a05a'), nv), amount: 0.55, grass: 1 }),
+  'conifer-forest': (_x, _z, _h, _s, nv) => ({ color: mix(color('#4a4630'), color('#5a5236'), nv), amount: 0.5, grass: 0.5 }),
+  mountains: (_x, _z, _h, _s, nv) => ({ color: mix(color('#77716a'), color('#9a9286'), nv), amount: 0.7, grass: 0.1 }),
+  hills: (_x, _z, _h, _s, nv) => ({ color: mix(color('#6a7a3a'), color('#8a8a5a'), nv), amount: 0.3, grass: 0.8 }),
+};
+
 export interface TerrainBuild {
   mesh: THREE.Mesh;
   /** 0..1 per vertex: how suitable for grass tufts. */
   grassWeight: Float32Array;
 }
 
-export function buildTerrain(field: Heightfield, camp: CampLayout, props: PropInstance[]): TerrainBuild {
+export function buildTerrain(field: Heightfield, camp: CampLayout, props: PropInstance[], biome: Uint8Array): TerrainBuild {
   const res = field.res;
   const geo = new THREE.PlaneGeometry(field.size, field.size, res - 1, res - 1);
   geo.rotateX(-Math.PI / 2);
@@ -75,12 +106,25 @@ export function buildTerrain(field: Heightfield, camp: CampLayout, props: PropIn
     const high = smoothstep(28, 44, h) * (0.5 + nv * 0.5);
     mix(c, ROCK, high * 0.7, c);
 
+    // Each environment paints its own ground; the lookup is jittered so borders blend.
+    const env = envAtPoint(biome, x + (nf - 0.5) * 9, z + (nv - 0.5) * 9);
+    let grassy = 1;
+    const ground = BIOME_GROUND[env];
+    if (ground && above > 0.05) {
+      const g = ground(x, z, h, slope, nv, nf);
+      mix(c, g.color, g.amount, c);
+      grassy = g.grass;
+    }
+    // Snow on the high peaks, whatever the environment.
+    const snow = env === 'volcanic' ? 0 : smoothstep(52, 66, h + nv * 6) * (1 - smoothstep(1.2, 1.7, slope));
+    mix(c, SNOW, snow, c);
+
     colors[k * 3] = c.r;
     colors[k * 3 + 1] = c.g;
     colors[k * 3 + 2] = c.b;
 
     grassWeight[k] =
-      (1 - steep) * (1 - campWear) * (1 - path) * smoothstep(0.6, 1.4, above) * (1 - high) * (1 - Math.min(1, fd * 1.2) * 0.6);
+      grassy * (1 - snow) * (1 - steep) * (1 - campWear) * (1 - path) * smoothstep(0.6, 1.4, above) * (1 - high) * (1 - Math.min(1, fd * 1.2) * 0.6);
   }
   geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
   geo.computeVertexNormals();

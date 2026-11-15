@@ -76,7 +76,7 @@ export const ENVIRONMENTS: readonly Environment[] = [
   }),
   env('desert', 'Desert', {
     ground: { sand: 0.9, gypsum: 0.3, saltpeter: 0.15, bitumen: 0.06, 'meteoric-iron': 0.02 },
-    flora: { thicket: 0.05 },
+    flora: { 'prickly-pear': 0.4, 'desert-scrub': 0.6 },
     fauna: { 'wild-goat': 0.1, hare: 0.1 },
     below: { sandstone: 0.7, 'rock-salt': 0.3, gypsum: 0.4, 'crude-oil': 0.25, 'natural-gas': 0.2, 'copper-ore': 0.12, potash: 0.1, 'uranium-ore': 0.02 },
   }),
