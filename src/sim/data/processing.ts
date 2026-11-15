@@ -35,7 +35,7 @@ export const PRODUCTS: Readonly<Record<string, string>> = {
   'carved-jade': 'Carved jade', 'amber-beads': 'Amber beads', leather: 'Leather', pelts: 'Pelts', linen: 'Linen', 'cotton-cloth': 'Cotton cloth', 'wool-cloth': 'Woollen cloth',
   canvas: 'Canvas', baskets: 'Baskets and mats', rope: 'Rope', dye: 'Dye', medicine: 'Medicine', candles: 'Candles and soap', 'wax-and-honey': 'Beeswax and honey',
   'meat-cuts': 'Meat cuts', 'smoked-fish': 'Smoked fish', 'smoked-meat': 'Smoked meat', flour: 'Flour', bread: 'Bread', preserves: 'Preserves', 'spice-blend': 'Spice blend',
-  'egg-dishes': 'Egg dishes', 'roast-poultry': 'Roast poultry', 'mana-cell': 'Mana cell', 'heat-core': 'Heat core', 'cold-core': 'Cold core', 'levitation-core': 'Levitation core', 'spirit-focus': 'Spirit focus',
+  'egg-dishes': 'Egg dishes', cheese: 'Cheese', 'roast-poultry': 'Roast poultry', 'mana-cell': 'Mana cell', 'heat-core': 'Heat core', 'cold-core': 'Cold core', 'levitation-core': 'Levitation core', 'spirit-focus': 'Spirit focus',
 };
 
 const r = (id: string, name: string, facility: string, era: EraId, inputs: Record<string, number>, outputs: Record<string, number>, seconds = 60): Recipe => ({ id, name, facility, era, inputs, outputs, seconds });
@@ -69,6 +69,7 @@ export const RECIPES: readonly Recipe[] = [
   r('dry-seaweed', 'Dry seaweed', 'drying-rack', 'hunter-gatherer', { seaweed: 3 }, { 'dried-seaweed': 1 }, 60),
   r('dry-peat', 'Dry peat', 'drying-rack', 'hunter-gatherer', { peat: 2 }, { 'peat-fuel': 2 }, 120),
   r('twist-sinew', 'Twist sinew cordage', 'drying-rack', 'hunter-gatherer', { sinew: 2 }, { cordage: 1 }, 40),
+  r('twist-reed-cordage', 'Twist reed cordage', 'drying-rack', 'hunter-gatherer', { reeds: 3 }, { cordage: 1 }, 45),
 
   // Wood
   r('cut-softwood', 'Cut softwood', 'log-cutter', 'stone', { softwood: 1 }, { lumber: 2 }),
@@ -178,6 +179,7 @@ export const RECIPES: readonly Recipe[] = [
   r('bake-bread', 'Bake bread', 'kitchen', 'iron', { flour: 2, 'fresh-water': 1 }, { bread: 3 }, 90),
   r('make-preserves', 'Make preserves', 'kitchen', 'stone', { berries: 4, honey: 1 }, { preserves: 2 }, 90),
   r('preserve-fruit', 'Preserve fruit', 'kitchen', 'stone', { 'wild-fruit': 3 }, { preserves: 1 }, 90),
+  r('make-cheese', 'Make cheese', 'kitchen', 'stone', { milk: 4 }, { cheese: 1 }, 120),
   r('blend-spices', 'Blend spices', 'kitchen', 'iron', { spices: 2 }, { 'spice-blend': 1 }, 60),
 
   // Magic

@@ -6,6 +6,7 @@
 import { Noise2D } from './noise';
 import { Rng, subSeed } from './rng';
 import { Heightfield, smoothstep } from './terrain';
+import { spawnHerds, type Herd } from './animals';
 import type { CampLayout, PropInstance, PropKind } from './world';
 
 export const TEST_SCENE_SIZE = 320;
@@ -29,6 +30,7 @@ export interface TestScene {
   props: PropInstance[];
   camp: CampLayout;
   flow: FlowField;
+  herds: Herd[];
 }
 
 /** Surface current of the water, in metres per second, on a regular grid. */
@@ -57,7 +59,9 @@ export function buildTestScene(seed: number): TestScene {
 
   const camp = layoutCamp(terrain);
   const props = scatterProps(seed, terrain, n);
-  return { terrain, props, camp, flow: buildFlow(terrain) };
+  const forestAt = (x: number, z: number) => n.fbm(x * 0.014 + 40, z * 0.014 - 20, 3) * 0.5 + 0.5;
+  const herds = spawnHerds(seed, terrain, CAMP_CENTER, forestAt);
+  return { terrain, props, camp, flow: buildFlow(terrain), herds };
 }
 
 function baseHeight(x: number, z: number, n: Noise2D, detail: Noise2D): number {
@@ -156,6 +160,7 @@ function scatterProps(seed: number, terrain: Heightfield, n: Noise2D): PropInsta
     props.push({ kind, x, z, scale, rot: rng.next() * Math.PI * 2 });
 
   const attempts = 9000;
+  let shellfish = 0;
   for (let a = 0; a < attempts; a++) {
     const x = rng.range(-half, half);
     const z = rng.range(-half, half);
@@ -165,6 +170,12 @@ function scatterProps(seed: number, terrain: Heightfield, n: Noise2D): PropInsta
     const campD = Math.hypot(x - CAMP_CENTER.x, z - CAMP_CENTER.z);
     const forest = n.fbm(x * 0.014 + 40, z * 0.014 - 20, 3) * 0.5 + 0.5; // 0..1
 
+    // Shellfish beds in the shallows.
+    if (above < -0.25 && above > -0.8 && shellfish < 6 && rng.next() < 0.01) {
+      add('shellfish', x, z, rng.range(0.9, 1.2));
+      shellfish++;
+      continue;
+    }
     if (above < -0.2) continue;
 
     // Reeds on the wet margins.
@@ -191,15 +202,27 @@ function scatterProps(seed: number, terrain: Heightfield, n: Noise2D): PropInsta
       const pineBias = smoothstep(8, 24, h);
       const r = rng.next();
       if (r < pineBias * 0.9) add('pine', x, z, rng.range(0.8, 1.25));
+      else if (forest < 0.62 && r < 0.9 && rng.next() < 0.12) add('apple', x, z, rng.range(0.8, 1.1));
       else if (r < 0.82) add('oak', x, z, rng.range(0.75, 1.25));
       else add('birch', x, z, rng.range(0.8, 1.15));
       continue;
     }
-    // Scattered bushes, flowers and the odd rock in the meadows.
+    // Forest floor: hazel and mushrooms under the trees.
+    if (forest > 0.56 && above > 1.2) {
+      const f = rng.next();
+      if (f < 0.06) add('hazel', x, z, rng.range(0.8, 1.2));
+      else if (f < 0.1) add('mushrooms', x, z, rng.range(0.8, 1.2));
+      continue;
+    }
+    // Meadows: bushes, herbs, stands of wild grain, tubers, flax by the water, the odd rock.
+    const grainy = n.fbm(x * 0.03 - 11, z * 0.03 + 7, 2) > 0.1;
     const r = rng.next();
-    if (r < 0.09) add('bush', x, z, rng.range(0.7, 1.3));
-    else if (r < 0.15 && above > 1) add('flowers', x, z, rng.range(0.8, 1.2));
-    else if (r < 0.16) add('rock', x, z, rng.range(0.4, 0.9));
+    if (r < 0.07) add(rng.next() < 0.55 ? 'berrybush' : 'bush', x, z, rng.range(0.7, 1.3));
+    else if (r < 0.11 && above > 1) add('flowers', x, z, rng.range(0.8, 1.2));
+    else if (r < 0.15 && grainy && above > 1.5) add('grain', x, z, rng.range(0.8, 1.2));
+    else if (r < 0.165 && above > 1.2) add('tubers', x, z, rng.range(0.8, 1.2));
+    else if (r < 0.18 && above < 3) add('flax', x, z, rng.range(0.8, 1.2));
+    else if (r < 0.19) add('rock', x, z, rng.range(0.4, 0.9));
   }
 
   // World features: wild beehives in hollow logs at the foot of broadleaf trees,

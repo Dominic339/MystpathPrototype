@@ -44,6 +44,8 @@ export const FACILITIES: readonly Facility[] = [
   f('apiary', 'Apiary', 'acquisition', 'iron', 'beekeeper', 1, 1),
   f('farm', 'Farm', 'acquisition', 'stone', 'farmer', 3, 4),
   f('chicken-coop', 'Chicken coop', 'acquisition', 'stone', 'herder', 1, 1),
+  f('pigsty', 'Pigsty', 'acquisition', 'stone', 'herder', 1, 1),
+  f('cattle-pasture', 'Cattle pasture', 'acquisition', 'iron', 'herder', 3, 2),
   f('herb-garden', 'Herb garden', 'acquisition', 'stone', 'farmer', 1, 1),
   f('spice-plantation', 'Spice plantation', 'acquisition', 'iron', 'farmer', 2, 3),
   f('mushroom-cellar', 'Mushroom cellar', 'acquisition', 'iron', 'farmer', 1, 1),

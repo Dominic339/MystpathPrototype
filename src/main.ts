@@ -9,6 +9,8 @@
 //   hex=1            show the hex grid
 //   q=low            skip ambient occlusion
 //   ui=0             hide the HUD
+//   inspect=x,z      open the hex inspector for the hex at this world position
+//   discover=all     grant every discovery and build every invention (or a comma list of ids)
 
 import * as THREE from 'three';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
@@ -29,6 +31,7 @@ import { buildVegetation } from './render/vegetation';
 import { buildGrass } from './render/grass';
 import { buildCamp, type CampBuild } from './render/camp';
 import { buildVillagers, type VillagerView } from './render/villagers';
+import { buildAnimals, type AnimalsView } from './render/animals';
 import { buildAirship } from './render/airship';
 import { buildHexOverlay } from './render/hexOverlay';
 import { CameraRig } from './render/cameraRig';
@@ -166,8 +169,11 @@ let water: WaterSystem | null = null;
 let boat: BoatView | null = null;
 let camp: CampBuild | null = null;
 let villagers: VillagerView | null = null;
+let animals: AnimalsView | null = null;
 let hexOverlay: THREE.LineSegments | null = null;
+// Inventions only appear once the band has built them.
 const airship = buildAirship();
+airship.group.visible = false;
 scene.add(airship.group);
 
 let simSeconds = startSeconds;
@@ -195,7 +201,10 @@ worker.onmessage = (e: MessageEvent<FromSim>) => {
     const lk = msg.waterway.lake;
     const lakeLoop: [number, number][] = [0, 1, 2, 3, 4, 5].map((k) => [lk.x + Math.cos(-2.3 + k * 1.05) * lk.r * 0.45, lk.z + Math.sin(-2.3 + k * 1.05) * lk.r * 0.45]);
     boat = buildBoat(water, [...river, ...lakeLoop]);
+    boat.group.visible = false;
     scene.add(boat.group);
+    animals = buildAnimals(msg.herds, terrain, water);
+    scene.add(animals.group);
     scene.add(buildVegetation(msg.props, terrain));
     camp = buildCamp(msg.camp, terrain);
     scene.add(camp.group);
@@ -209,11 +218,17 @@ worker.onmessage = (e: MessageEvent<FromSim>) => {
     scene.add(hexOverlay);
     rig.setTerrain(terrain);
     framesSinceWorld = 0;
+    const ins = (params.get('inspect') ?? '').split(',').map(Number);
+    if (ins.length === 2 && ins.every(Number.isFinite)) {
+      const h = worldToHex(ins[0], ins[1]);
+      send({ type: 'inspectHex', q: h.q, r: h.r });
+    }
   } else if (msg.type === 'tick') {
     simSeconds = msg.totalSeconds;
     simSpeed = msg.speed;
     lastTickAt = performance.now();
     villagers?.setTargets(msg.villagers);
+    animals?.setTargets(msg.herds);
     // Villagers fetching water stir the surface.
     for (let k = 0; k < msg.villagers.length; k += VILLAGER_STRIDE) {
       if (msg.villagers[k + 3] === 3 && Math.random() < 0.15) {
@@ -231,7 +246,17 @@ worker.onmessage = (e: MessageEvent<FromSim>) => {
     globalUniforms.uWear.value.dispose();
     globalUniforms.uWear.value = tex;
   } else if (msg.type === 'stats') {
+    const prev = latestStats;
     latestStats = msg.stats;
+    const hasCanoe = msg.stats.built.includes('Dugout canoe');
+    const hasAirship = msg.stats.built.includes('Airship');
+    if (boat) boat.group.visible = hasCanoe;
+    airship.group.visible = hasAirship;
+    followButtons[0].style.display = hasAirship ? '' : 'none';
+    followButtons[1].style.display = hasCanoe ? '' : 'none';
+    // Announce new events from the chronicle.
+    const latest = msg.stats.events[0];
+    if (latest && prev && prev.events[0]?.text !== latest.text) toast(latest.text);
     if (panel.style.display !== 'none') renderPanel();
   } else if (msg.type === 'hexInfo') {
     showHexInfo(msg.info);
@@ -244,6 +269,7 @@ worker.onmessage = (e: MessageEvent<FromSim>) => {
   }
 };
 send({ type: 'init', seed, startSeconds, speed: startSpeed, warmup: num('warm', 0) });
+if (params.has('discover')) send({ type: 'grantDiscoveries', ids: params.get('discover') === 'all' ? 'all' : params.get('discover')!.split(',') });
 
 // ---------- input ----------
 const SPEEDS = [0, 1, 10, 60];
@@ -305,9 +331,14 @@ function showHexInfo(info: HexInfo | null): void {
   }
   const list = (items: { name: string; qty: number; max?: number }[]) =>
     items.length ? items.map((i) => `<li><span>${i.name}</span><b>${i.qty}${i.max !== undefined ? ` / ${Math.round(i.max)}` : ''}</b></li>`).join('') : '<li class="quiet">None</li>';
+  const living = (items: { name: string; count: number; holds: string }[]) =>
+    items.length ? items.map((i) => `<li><span>${i.name} <span class="quiet">×${i.count}</span>${i.holds ? `<br><span class="quiet small">${i.holds}</span>` : ''}</span></li>`).join('') : '<li class="quiet">None</li>';
   hexCard.innerHTML = `<button class="close" aria-label="Close">×</button><h3>${info.environment}</h3>
-    <h4>On the surface</h4><ul>${list(info.surface)}</ul>
-    <h4>Below ground</h4><ul>${list(info.subsurface)}</ul>`;
+    ${info.water ? `<div class="quiet">${info.water}: unlimited</div>` : ''}
+    <h4>Plants</h4><ul>${living(info.plants)}</ul>
+    <h4>Animals</h4><ul>${living(info.animals)}</ul>
+    <h4>On the ground</h4><ul>${list(info.ground)}</ul>
+    <h4>Below ground</h4><ul>${list(info.below)}</ul>`;
   hexCard.style.display = 'block';
   hexCard.querySelector('.close')!.addEventListener('click', () => {
     hexCard.style.display = 'none';
@@ -332,17 +363,46 @@ function renderPanel(): void {
   const pct = (x: number) => `${Math.round(x * 100)}%`;
   const people = st.villagers
     .map(
-      (v) => `<div class="person"><div class="row"><b>${v.name}</b><span class="quiet">loves ${v.passion}</span></div>
+      (v) => `<div class="person"><div class="row"><b>${v.name}${v.prodigy ? ' <span class="tag">prodigy</span>' : ''}${v.inspired ? ' <span class="tag gold">inspired</span>' : ''}</b><span class="quiet">loves ${v.passion} · gifted at ${v.talent}</span></div>
       <div class="row"><span>${v.job ?? (v.activity === 'sleeping' ? 'Sleeping' : 'Resting')}</span><span class="quiet">fed ${pct(1 - v.hunger)} · fulfilled ${pct(v.fulfilment)}</span></div>
       ${v.carrying ? `<div class="quiet">Carrying ${v.carrying}</div>` : ''}
       <div class="quiet">Priorities: ${v.priorities.slice(0, 3).join(', ') || '—'}</div>
-      ${v.skills.length ? `<div class="quiet">Skills: ${v.skills.map((s) => `${s.job} ${s.level}`).join(', ')}</div>` : ''}</div>`,
+      ${v.skills.length ? `<div class="quiet">Skills: ${v.skills.map((s) => `${s.job} ${s.level}`).join(', ')}</div>` : ''}
+      ${v.idea ? `<div class="quiet">Working something out: ${v.idea.name} <span class="bar"><i style="width:${pct(v.idea.progress)}"></i></span></div>` : ''}
+      ${v.discoveries.length ? `<div class="quiet">Discovered: ${v.discoveries.join(', ')}</div>` : ''}
+      <button class="inspire" data-id="${v.id}" ${v.inspired ? 'disabled' : ''}>Inspire</button></div>`,
     )
     .join('');
+  const disc = st.discoveries.length ? st.discoveries.map((d) => `<li><span>${d.name}</span><span class="quiet">${d.by ?? ''}</span></li>`).join('') : '<li class="quiet">None yet. Villagers make discoveries through their work.</li>';
+  const events = st.events.length ? st.events.map((e) => `<li><span class="quiet">Day ${e.day}</span> ${e.text}</li>`).join('') : '<li class="quiet">Nothing yet.</li>';
+  const making = [...st.projects.map((p) => `${p.name} (${pct(p.progress)} built)`), ...st.built.map((b) => `${b} ✓`)];
   panel.innerHTML = `<button class="close" aria-label="Close">×</button><h3>Civilization</h3>
+    <div class="row"><b>${st.era} era</b>${st.nextEra ? `<span class="quiet">${st.nextEra.name}: ${st.nextEra.have} of ${st.nextEra.need} discoveries</span>` : ''}</div>
     <div class="quiet">Food on hand: ${st.food.toFixed(1)} days for one person</div>
+    <h4>Discoveries</h4><ul>${disc}</ul>
+    ${making.length ? `<h4>Inventions</h4><ul>${making.map((m) => `<li>${m}</li>`).join('')}</ul>` : ''}
+    <h4>Chronicle</h4><ul class="chronicle">${events}</ul>
     <h3>People</h3>${people}<h3>Stockpile</h3>${stock}`;
+  panel.querySelectorAll<HTMLButtonElement>('.inspire').forEach((b) =>
+    b.addEventListener('click', () => {
+      send({ type: 'inspire', villager: Number(b.dataset.id) });
+      b.disabled = true;
+    }),
+  );
   panel.querySelector('.close')!.addEventListener('click', () => (panel.style.display = 'none'));
+}
+
+// Short notices for notable events (discoveries, inventions, hunted-out herds).
+const toastEl = document.createElement('div');
+toastEl.id = 'toast';
+document.body.appendChild(toastEl);
+let toastTimer = 0;
+function toast(text: string): void {
+  if (!showUi) return;
+  toastEl.textContent = text;
+  toastEl.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = window.setTimeout(() => toastEl.classList.remove('show'), 6000);
 }
 
 // Toolbar (also the way to reach these actions on a phone).
@@ -436,6 +496,7 @@ function frame(): void {
 
   camp?.update(realTime, s.night);
   villagers?.update(dt, realTime);
+  animals?.update(dt, realTime);
   airship.update(gameSeconds, s.night);
   boat?.update(dt, realTime);
 

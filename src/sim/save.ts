@@ -7,7 +7,7 @@ import type { World } from './world';
 import { buildTestScene } from './testScene';
 import { NavGrid } from './pathfinding';
 
-export const SAVE_VERSION = 3;
+export const SAVE_VERSION = 4;
 
 export interface SaveFile {
   version: number;
@@ -20,7 +20,13 @@ export interface SaveFile {
   hexes: World['hexes'];
   nodes: World['nodes'];
   stockpile: World['stockpile'];
+  herds: World['herds'];
   discoveries: World['discoveries'];
+  discoveryLog: World['discoveryLog'];
+  seen: World['seen'];
+  built: World['built'];
+  projects: World['projects'];
+  events: World['events'];
   wear: string;
   villagers: World['villagers'];
 }
@@ -42,7 +48,13 @@ export function saveWorld(world: World): SaveFile {
     hexes: world.hexes,
     nodes: world.nodes,
     stockpile: world.stockpile,
+    herds: world.herds,
     discoveries: world.discoveries,
+    discoveryLog: world.discoveryLog,
+    seen: world.seen,
+    built: world.built,
+    projects: world.projects,
+    events: world.events,
     wear: encodeFloats(world.nav.wear),
     villagers: world.villagers,
   };
@@ -69,7 +81,13 @@ export function loadWorld(save: SaveFile): World {
     hexes: clone(save.hexes),
     nodes: clone(save.nodes),
     stockpile: clone(save.stockpile),
-    discoveries: [...(save.discoveries ?? [])],
+    herds: clone(save.herds),
+    discoveries: [...save.discoveries],
+    discoveryLog: clone(save.discoveryLog),
+    seen: [...save.seen],
+    built: [...save.built],
+    projects: clone(save.projects),
+    events: clone(save.events),
     nav,
     villagers: clone(save.villagers),
   };

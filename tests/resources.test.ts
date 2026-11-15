@@ -7,14 +7,15 @@ import { ENVIRONMENTS } from '../src/sim/data/environments';
 import { ERAS, eraIndex } from '../src/sim/data/eras';
 import { JOBS } from '../src/sim/data/jobs';
 import { DISCOVERIES, DISCOVERY_BY_ID } from '../src/sim/data/discoveries';
-import { FEATURES, FEATURE_BY_ID } from '../src/sim/data/features';
+import { FLORA, FLORA_BY_ID } from '../src/sim/data/flora';
+import { FAUNA, FAUNA_BY_ID } from '../src/sim/data/fauna';
 
 const isItem = (id: string) => MATERIAL_BY_ID.has(id) || PRODUCTS[id] !== undefined;
 
 describe('base materials', () => {
-  it('has 103 unique materials', () => {
-    expect(MATERIALS).toHaveLength(103);
-    expect(new Set(MATERIALS.map((m) => m.id)).size).toBe(103);
+  it('has 104 unique materials', () => {
+    expect(MATERIALS).toHaveLength(104);
+    expect(new Set(MATERIALS.map((m) => m.id)).size).toBe(104);
   });
 
   it('every material can be acquired', () => {
@@ -27,27 +28,53 @@ describe('base materials', () => {
     expect(missing).toEqual([]);
   });
 
-  it('every wild material occurs in the world (tile pools or world features)', () => {
-    const found = new Set<string>();
-    for (const e of ENVIRONMENTS) for (const id of [...Object.keys(e.surface), ...Object.keys(e.subsurface)]) found.add(id);
-    for (const f of FEATURES) for (const id of Object.keys(f.yields)) found.add(id);
-    expect(MATERIALS.filter((m) => !m.farmedOnly && !found.has(m.id)).map((m) => m.id)).toEqual([]);
+  it('every wild material has a real source in the world', () => {
+    const ground = new Set<string>();
+    const below = new Set<string>();
+    const water = new Set<string>();
+    for (const e of ENVIRONMENTS) {
+      for (const id of Object.keys(e.ground)) ground.add(id);
+      for (const id of Object.keys(e.below)) below.add(id);
+      if (e.water) water.add(e.water);
+    }
+    const plants = new Set(FLORA.flatMap((f) => Object.keys(f.yields)));
+    const animals = new Set(FAUNA.flatMap((f) => Object.keys(f.yields)));
+    const kept = new Set(FAUNA.flatMap((f) => Object.keys(f.domestic?.yields ?? {})));
+    for (const m of MATERIALS) {
+      const src = { ground, below, water, plant: plants, animal: m.farmedOnly ? kept : animals }[m.layer];
+      const ok = src.has(m.id) || (m.layer === 'ground' && below.has(m.id)) || (m.layer === 'below' && ground.has(m.id)) || (m.layer === 'water' && ground.has(m.id));
+      expect(ok, `${m.id} (${m.layer})`).toBe(true);
+    }
   });
 
-  it('farmable organics come from features or farming, not endless tile pools', () => {
-    for (const e of ENVIRONMENTS) for (const id of ['honey', 'eggs', 'feathers', 'poultry']) expect(e.surface[id], `${e.id}: ${id}`).toBeUndefined();
-    // Large-scale sources need discoveries.
-    for (const id of ['honey', 'eggs', 'feathers', 'poultry', 'herbs', 'wool']) {
-      const bulk = ACQUISITION.filter((a) => a.facility && a.yields[id]);
-      expect(bulk.length, id).toBeGreaterThan(0);
+  it('nothing living sits in a tile pool', () => {
+    for (const e of ENVIRONMENTS)
+      for (const id of [...Object.keys(e.ground), ...Object.keys(e.below)]) {
+        const layer = MATERIAL_BY_ID.get(id)!.layer;
+        expect(layer === 'plant' || layer === 'animal', `${e.id}: ${id}`).toBe(false);
+      }
+  });
+
+  it('kept animals and crops need discoveries', () => {
+    for (const m of MATERIALS.filter((x) => x.farmedOnly)) {
+      const bulk = ACQUISITION.filter((a) => a.yields[m.id]);
+      expect(bulk.length, m.id).toBeGreaterThan(0);
       for (const a of bulk) expect(a.requires.length, `${a.id} needs a discovery`).toBeGreaterThan(0);
     }
+    for (const a of ACQUISITION.filter((x) => x.source === 'farm' || x.source === 'livestock')) expect(a.requires.length, a.id).toBeGreaterThan(0);
+    for (const f of FAUNA) if (f.domestic) expect(DISCOVERY_BY_ID.has(f.domestic.discovery), f.id).toBe(true);
+    for (const f of FLORA) if (f.cultivatedBy) expect(DISCOVERY_BY_ID.has(f.cultivatedBy), f.id).toBe(true);
   });
 });
 
 describe('references', () => {
-  it('environment pools only name real materials', () => {
-    for (const e of ENVIRONMENTS) for (const id of [...Object.keys(e.surface), ...Object.keys(e.subsurface)]) expect(MATERIAL_BY_ID.has(id), `${e.id}: ${id}`).toBe(true);
+  it('environments only name real materials and species', () => {
+    for (const e of ENVIRONMENTS) {
+      for (const id of [...Object.keys(e.ground), ...Object.keys(e.below)]) expect(MATERIAL_BY_ID.has(id), `${e.id}: ${id}`).toBe(true);
+      for (const id of Object.keys(e.flora)) expect(FLORA_BY_ID.has(id), `${e.id}: ${id}`).toBe(true);
+      for (const id of Object.keys(e.fauna)) expect(FAUNA_BY_ID.has(id), `${e.id}: ${id}`).toBe(true);
+    }
+    for (const f of [...FLORA, ...FAUNA]) for (const id of Object.keys(f.yields)) expect(MATERIAL_BY_ID.has(id), `${f.id}: ${id}`).toBe(true);
   });
 
   it('acquisition methods are consistent', () => {
@@ -73,10 +100,16 @@ describe('references', () => {
     }
   });
 
-  it('discoveries and feature references resolve', () => {
+  it('discovery and species references resolve', () => {
+    const work = new Set([...ACQUISITION.map((a) => a.id), ...RECIPES.map((r) => r.id)]);
+    for (const d of DISCOVERIES) {
+      for (const w of d.inspiredBy) expect(work.has(w), `${d.id}: ${w}`).toBe(true);
+      for (const s of d.needsSeen ?? []) expect(MATERIAL_BY_ID.has(s) || FAUNA_BY_ID.has(s) || FLORA_BY_ID.has(s), `${d.id}: ${s}`).toBe(true);
+      for (const id of Object.keys(d.build?.inputs ?? {})) expect(isItem(id), `${d.id}: ${id}`).toBe(true);
+    }
     for (const a of ACQUISITION) {
       for (const r of a.requires) expect(DISCOVERY_BY_ID.has(r), `${a.id}: ${r}`).toBe(true);
-      if (a.feature) expect(FEATURE_BY_ID.has(a.feature), a.id).toBe(true);
+      for (const sp of a.species ?? []) expect(FLORA_BY_ID.has(sp) || FAUNA_BY_ID.has(sp), `${a.id}: ${sp}`).toBe(true);
       // Every facility method is gated by a discovery.
       if (a.facility) expect(a.requires.length, a.id).toBeGreaterThan(0);
     }
@@ -85,7 +118,6 @@ describe('references', () => {
       expect(pre, `${d.id}: ${r}`).toBeDefined();
       expect(eraIndex(pre!.era)).toBeLessThanOrEqual(eraIndex(d.era));
     }
-    for (const e of ENVIRONMENTS) for (const f of Object.keys(e.features)) expect(FEATURE_BY_ID.has(f), `${e.id}: ${f}`).toBe(true);
   });
 
   it('includes the facilities the design names', () => {

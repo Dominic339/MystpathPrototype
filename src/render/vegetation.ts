@@ -164,7 +164,7 @@ function pine(seed: number): PlantGeo {
   return { wood: merge(parts), leaves: merge(boughs) };
 }
 
-function bush(seed: number): PlantGeo {
+function bush(seed: number, berries: boolean): PlantGeo {
   const parts: THREE.BufferGeometry[] = [];
   const lobes: Lobe[] = [];
   for (let k = 0; k < 4; k++) {
@@ -174,8 +174,8 @@ function bush(seed: number): PlantGeo {
   const g = canopyMass(lobes, seed, { deep: color('#22391a'), base: color('#456f2a'), sun: color('#86a83d') }, 3);
   // Squash so the bush sits low and wide.
   g.scale(1, 0.85, 1);
-  // Occasional berries.
-  if (hash01(seed, 9) > 0.4) {
+  // Berry bushes carry fruit; thickets do not.
+  if (berries) {
     const berry = color('#9a1f2c');
     for (let k = 0; k < 9; k++) {
       const a = k * 2.4;
@@ -318,6 +318,188 @@ function nest(seed: number): THREE.BufferGeometry {
   return merge(parts);
 }
 
+/** A small wild apple tree: short leaning trunk, round crown, red and yellow fruit. */
+function apple(seed: number): PlantGeo {
+  const parts: THREE.BufferGeometry[] = [];
+  const h = rand(seed, 1, 1.9, 2.4);
+  const a = rand(seed, 2, 0, 6.28);
+  const top = V(Math.cos(a) * 0.35, h, Math.sin(a) * 0.35);
+  parts.push(limbTube({ points: [V(0, -0.3, 0), V(top.x * 0.4, h * 0.5, top.z * 0.4), top], r0: 0.2, r1: 0.1, flare: 0.5, knots: [{ t: 0.5, angle: a, size: 0.06 }] }, OAK_BARK, 8, 10));
+  const lobes: Lobe[] = [];
+  for (let k = 0; k < 4; k++) {
+    const ba = a + k * 1.6 + rand(seed, 3, -0.3, 0.3, k);
+    const end = V(top.x + Math.cos(ba) * 1.1, h + 0.8, top.z + Math.sin(ba) * 1.1);
+    parts.push(limbTube({ points: [top, end], r0: 0.08, r1: 0.03 }, OAK_BARK, 5, 5));
+    lobes.push({ center: end.clone().add(V(0, 0.3, 0)), radius: rand(seed, 4, 0.9, 1.2, k) });
+  }
+  lobes.push({ center: top.clone().add(V(0, 1.4, 0)), radius: 1.3 });
+  const fruit = [color('#b8262b'), color('#d6492a'), color('#d9b531')];
+  for (let k = 0; k < 16; k++) {
+    const lb = lobes[k % lobes.length];
+    const u = hash01(seed, 5, k) * Math.PI * 2;
+    const v = 0.4 + hash01(seed, 6, k) * 0.9;
+    const g = new THREE.SphereGeometry(0.075, 6, 5);
+    g.translate(lb.center.x + Math.cos(u) * Math.sin(v) * lb.radius * 0.95, lb.center.y - Math.cos(v) * lb.radius * 0.8, lb.center.z + Math.sin(u) * Math.sin(v) * lb.radius * 0.95);
+    parts.push(part(g, fruit[k % 3]));
+  }
+  return { wood: merge(parts), leaves: canopyMass(lobes, seed, { deep: color('#25421c'), base: color('#4a7330'), sun: color('#8fae48') }, 4) };
+}
+
+/** Hazel: a many-stemmed shrub, stems fanning out, clusters of nuts in their husks. */
+function hazel(seed: number): PlantGeo {
+  const parts: THREE.BufferGeometry[] = [];
+  const lobes: Lobe[] = [];
+  const bark: BarkPalette = { dark: color('#4a3a2c'), light: color('#8a7058'), knot: color('#2a2018') };
+  for (let k = 0; k < 6; k++) {
+    const a = (k / 6) * Math.PI * 2 + hash01(seed, 1, k);
+    const lean = 0.5 + hash01(seed, 2, k) * 0.6;
+    const h = 2.2 + hash01(seed, 3, k) * 0.9;
+    const end = V(Math.cos(a) * lean, h, Math.sin(a) * lean);
+    parts.push(limbTube({ points: [V(Math.cos(a) * 0.1, -0.2, Math.sin(a) * 0.1), V(end.x * 0.5, h * 0.55, end.z * 0.5), end], r0: 0.05, r1: 0.025 }, bark, 5, 6));
+    lobes.push({ center: end.clone().add(V(Math.cos(a) * 0.2, 0.1, Math.sin(a) * 0.2)), radius: 0.7 + hash01(seed, 4, k) * 0.25 });
+  }
+  lobes.push({ center: V(0, 2.0, 0), radius: 0.9 });
+  const nut = color('#8a5a2a');
+  const husk = color('#9fb04a');
+  for (let k = 0; k < 10; k++) {
+    const lb = lobes[k % lobes.length];
+    const u = hash01(seed, 5, k) * Math.PI * 2;
+    const x = lb.center.x + Math.cos(u) * lb.radius * 0.95;
+    const z = lb.center.z + Math.sin(u) * lb.radius * 0.95;
+    const y = lb.center.y - lb.radius * 0.3;
+    for (let n = 0; n < 3; n++) {
+      const g = new THREE.SphereGeometry(0.04, 5, 4);
+      g.scale(1, 1.2, 1);
+      g.translate(x + (n - 1) * 0.05, y, z);
+      parts.push(part(g, n === 1 ? husk : nut));
+    }
+  }
+  const leaves = canopyMass(lobes, seed, { deep: color('#29431d'), base: color('#557a2e'), sun: color('#9bb24a') }, 3);
+  return { wood: merge(parts), leaves };
+}
+
+/** A stand of wild grain: stalks with drooping golden seed heads. */
+function grain(seed: number): THREE.BufferGeometry {
+  const parts: THREE.BufferGeometry[] = [];
+  const stem = color('#8a9a48');
+  const ripe = color('#d8b85a');
+  // Low leafy base so the stand reads from a distance.
+  for (let k = 0; k < 10; k++) {
+    const a = (k / 10) * Math.PI * 2;
+    const blade = new THREE.PlaneGeometry(0.06, 0.45);
+    blade.translate(0, 0.22, 0);
+    blade.rotateX(0.5);
+    blade.rotateY(-a);
+    blade.translate(Math.cos(a) * 0.15, 0, Math.sin(a) * 0.15);
+    parts.push(part(blade, (p) => mix(color('#5f7a34'), stem, p.y * 2)));
+  }
+  for (let k = 0; k < 48; k++) {
+    const a = hash01(seed, 1, k) * Math.PI * 2;
+    const r = Math.sqrt(hash01(seed, 2, k)) * 0.75;
+    const h = 0.85 + hash01(seed, 3, k) * 0.4;
+    const x = Math.cos(a) * r;
+    const z = Math.sin(a) * r;
+    const bend = 0.12 + hash01(seed, 4, k) * 0.15;
+    const tip = V(x + Math.cos(a) * bend, h, z + Math.sin(a) * bend);
+    parts.push(part(limb(V(x, -0.05, z), tip, 0.018, 0.01, 3), (p) => mix(stem, ripe, Math.min(1, p.y / h))));
+    const head = new THREE.CapsuleGeometry(0.035, 0.2, 2, 5);
+    head.rotateZ(0.55);
+    head.rotateY(-a);
+    head.translate(tip.x + Math.cos(a) * 0.05, h - 0.04, tip.z + Math.sin(a) * 0.05);
+    parts.push(part(head, (p) => jitter(ripe, 0.1, p.x * 9, p.y * 9, p.z * 9)));
+  }
+  return merge(parts);
+}
+
+/** Wild tubers above ground: a rosette of broad leaves and white umbel flowers. */
+function tubers(seed: number): THREE.BufferGeometry {
+  const parts: THREE.BufferGeometry[] = [];
+  const leaf = color('#4f7a30');
+  for (let k = 0; k < 8; k++) {
+    const a = (k / 8) * Math.PI * 2 + hash01(seed, 1, k) * 0.4;
+    const g = new THREE.SphereGeometry(0.16, 6, 4);
+    g.scale(1.6, 0.18, 0.7);
+    g.rotateZ(-0.35);
+    g.translate(0.22, 0.1, 0);
+    g.rotateY(-a);
+    parts.push(part(g, (p) => jitter(leaf, 0.12, p.x * 5, p.y * 5, p.z * 5)));
+  }
+  for (let k = 0; k < 3; k++) {
+    const a = hash01(seed, 2, k) * 6.28;
+    const top = V(Math.cos(a) * 0.12, 0.55 + hash01(seed, 3, k) * 0.2, Math.sin(a) * 0.12);
+    parts.push(part(limb(V(0, 0, 0), top, 0.012, 0.01, 3), color('#5f7d34')));
+    const umbel = new THREE.SphereGeometry(0.09, 7, 3, 0, Math.PI * 2, 0, Math.PI / 2);
+    umbel.scale(1, 0.4, 1);
+    umbel.translate(top.x, top.y, top.z);
+    parts.push(part(umbel, color('#eeeadc')));
+  }
+  return merge(parts);
+}
+
+/** A ring of mushrooms on a mossy patch. */
+function mushrooms(seed: number): THREE.BufferGeometry {
+  const parts: THREE.BufferGeometry[] = [];
+  const moss = new THREE.CircleGeometry(0.8, 10);
+  moss.rotateX(-Math.PI / 2);
+  moss.translate(0, 0.03, 0);
+  parts.push(part(moss, (p) => jitter(color('#4f6a2a'), 0.15, p.x * 4, 0, p.z * 4)));
+  const red = hash01(seed, 9) > 0.6;
+  const cap = red ? color('#b8352a') : color('#9a6a3e');
+  for (let k = 0; k < 8; k++) {
+    const a = (k / 8) * Math.PI * 2 + hash01(seed, 1, k) * 0.5;
+    const r = 0.45 + hash01(seed, 2, k) * 0.2;
+    const h = 0.1 + hash01(seed, 3, k) * 0.1;
+    const x = Math.cos(a) * r;
+    const z = Math.sin(a) * r;
+    parts.push(part(limb(V(x, 0, z), V(x, h, z), 0.02, 0.016, 5), color('#e8e0cc')));
+    const c = new THREE.SphereGeometry(0.06 + hash01(seed, 4, k) * 0.04, 8, 4, 0, Math.PI * 2, 0, Math.PI / 2);
+    c.scale(1, 0.6, 1);
+    c.translate(x, h, z);
+    parts.push(part(c, (p) => (red && noise3(p.x * 40, p.y * 40, p.z * 40) > 0.45 ? color('#f2ead8') : cap)));
+  }
+  return merge(parts);
+}
+
+/** Wild flax: slender stalks with small sky-blue flowers. */
+function flax(seed: number): THREE.BufferGeometry {
+  const parts: THREE.BufferGeometry[] = [];
+  const stem = color('#6f8f3e');
+  const bloom = color('#7aa0de');
+  for (let k = 0; k < 18; k++) {
+    const a = hash01(seed, 1, k) * Math.PI * 2;
+    const r = Math.sqrt(hash01(seed, 2, k)) * 0.5;
+    const h = 0.6 + hash01(seed, 3, k) * 0.3;
+    const x = Math.cos(a) * r;
+    const z = Math.sin(a) * r;
+    parts.push(part(limb(V(x, -0.05, z), V(x * 1.1, h, z * 1.1), 0.008, 0.006, 3), stem));
+    if (k % 2 === 0) {
+      const f = new THREE.CircleGeometry(0.045, 5);
+      f.rotateX(-Math.PI / 2 + 0.3);
+      f.translate(x * 1.1, h, z * 1.1);
+      parts.push(part(f, bloom));
+    }
+  }
+  return merge(parts);
+}
+
+/** A shellfish bed: mussels clustered on stones in the shallows. */
+function shellfish(seed: number): THREE.BufferGeometry {
+  const parts: THREE.BufferGeometry[] = [];
+  for (let k = 0; k < 4; k++) {
+    const g = rockShape(0.35, seed + k);
+    g.translate((hash01(seed, 1, k) - 0.5) * 1.2, 0, (hash01(seed, 2, k) - 0.5) * 1.2);
+    parts.push(part(g, (p) => jitter(color('#6a665c'), 0.1, p.x * 3, p.y * 3, p.z * 3)));
+  }
+  for (let k = 0; k < 22; k++) {
+    const sh = new THREE.SphereGeometry(0.06, 6, 4);
+    sh.scale(1.8, 0.6, 0.9);
+    sh.rotateY(hash01(seed, 3, k) * 6.28);
+    sh.translate((hash01(seed, 4, k) - 0.5) * 1.3, 0.15 + hash01(seed, 5, k) * 0.12, (hash01(seed, 6, k) - 0.5) * 1.3);
+    parts.push(part(sh, k % 4 ? color('#1f2230') : color('#4a3a5a')));
+  }
+  return merge(parts);
+}
+
 const VARIANTS = 3;
 
 interface BuiltKind {
@@ -335,7 +517,15 @@ function buildKind(kind: PropKind, v: number): BuiltKind {
     case 'oak': return { geo: oak(seed), sway: 0.0016, flat: false, shadow: true, density: 1 };
     case 'birch': return { geo: birch(seed), sway: 0.002, flat: false, shadow: true, density: 0.92 };
     case 'pine': return { geo: pine(seed), sway: 0.0009, flat: false, shadow: true, density: 1.12 };
-    case 'bush': return { geo: bush(seed), sway: 0.02, flat: false, shadow: true, density: 1.1 };
+    case 'bush': return { geo: bush(seed, false), sway: 0.02, flat: false, shadow: true, density: 1.1 };
+    case 'berrybush': return { geo: bush(seed, true), sway: 0.02, flat: false, shadow: true, density: 1.1 };
+    case 'apple': return { geo: apple(seed), sway: 0.002, flat: false, shadow: true, density: 1 };
+    case 'hazel': return { geo: hazel(seed), sway: 0.006, flat: false, shadow: true, density: 1 };
+    case 'grain': return { geo: { wood: grain(seed) }, sway: 0.12, flat: false, shadow: true, density: 1 };
+    case 'tubers': return { geo: { wood: tubers(seed) }, sway: 0.08, flat: false, shadow: false, density: 1 };
+    case 'mushrooms': return { geo: { wood: mushrooms(seed) }, sway: 0, flat: false, shadow: false, density: 1 };
+    case 'flax': return { geo: { wood: flax(seed) }, sway: 0.2, flat: false, shadow: false, density: 1 };
+    case 'shellfish': return { geo: { wood: shellfish(seed) }, sway: 0, flat: true, shadow: false, density: 1 };
     case 'rock': return { geo: { wood: rock(seed, 0.8) }, sway: 0, flat: true, shadow: true, density: 1 };
     case 'boulder': return { geo: { wood: rock(seed + 5, 2.2) }, sway: 0, flat: true, shadow: true, density: 1 };
     case 'reeds': return { geo: { wood: reeds(seed) }, sway: 0.05, flat: false, shadow: false, density: 1 };
@@ -369,7 +559,7 @@ export function buildVegetation(props: PropInstance[], terrain: Heightfield): TH
       const mat = natureMaterial({
         sway: built.sway,
         flat: built.flat,
-        side: kind === 'reeds' ? THREE.DoubleSide : THREE.FrontSide,
+        side: kind === 'reeds' || kind === 'flax' || kind === 'mushrooms' || kind === 'grain' ? THREE.DoubleSide : THREE.FrontSide,
         grain: built.flat ? 0.18 : 0.12,
         grainScale: 1.6,
       });
@@ -387,14 +577,14 @@ export function buildVegetation(props: PropInstance[], terrain: Heightfield): TH
     }
     list.forEach((p, i) => {
       // Sink slightly so bases never float on slopes.
-      const y = terrain.sample(p.x, p.z) - (kind === 'boulder' ? 0.6 : 0.05);
+      const y = terrain.sample(p.x, p.z) - (kind === 'boulder' ? 0.6 : kind === 'shellfish' ? 0.15 : 0.05);
       q.setFromAxisAngle(up, p.rot);
       s.setScalar(p.scale);
       t.set(p.x, y, p.z);
       m.compose(t, q, s);
       // Each plant gets its own tint: some greener, some more olive or autumn-touched.
       const r = hash01(31, i, kind.length);
-      const leafy = kind === 'oak' || kind === 'birch' || kind === 'pine' || kind === 'bush';
+      const leafy = kind === 'oak' || kind === 'birch' || kind === 'pine' || kind === 'bush' || kind === 'berrybush' || kind === 'apple' || kind === 'hazel';
       const tint = leafy
         ? new THREE.Color(1, 1, 1).multiplyScalar(0.82 + r * 0.32).lerp(new THREE.Color(1.15, 1.05, 0.7), hash01(32, i) * 0.35)
         : new THREE.Color(1, 1, 1).multiplyScalar(0.85 + r * 0.25);

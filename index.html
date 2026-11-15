@@ -44,6 +44,21 @@
       }
       @media (max-width: 600px) { #hud { font-size: 11px; max-width: calc(100vw - 48px); } #toolbar button { padding: 8px 10px; font-size: 12px; } }
       #hud .quiet { color: #a8b3c7; }
+      .card .small { font-size: 11px; }
+      .card .tag { font-size: 10px; font-weight: 600; padding: 1px 5px; border-radius: 6px; background: rgba(120, 160, 230, 0.3); }
+      .card .tag.gold { background: rgba(214, 168, 62, 0.45); }
+      .card .bar { display: inline-block; width: 60px; height: 5px; border-radius: 3px; background: rgba(255, 255, 255, 0.12); vertical-align: middle; overflow: hidden; }
+      .card .bar i { display: block; height: 100%; background: #d6a83e; }
+      .card .inspire { margin-top: 4px; font: 600 11px/1 system-ui, sans-serif; color: #141413; background: #d6a83e; border: 0; border-radius: 10px; padding: 5px 10px; cursor: pointer; }
+      .card .inspire:disabled { opacity: 0.4; cursor: default; }
+      .card .chronicle li { display: block; }
+      #toast {
+        position: fixed; left: 50%; top: 14px; transform: translate(-50%, -20px); opacity: 0; transition: all 0.4s ease;
+        max-width: min(460px, calc(100vw - 40px)); padding: 9px 14px; border-radius: 10px; pointer-events: none;
+        background: rgba(214, 168, 62, 0.92); color: #141413; font: 600 13px/1.4 system-ui, -apple-system, sans-serif;
+      }
+      #toast.show { opacity: 1; transform: translate(-50%, 0); }
+      @media (max-width: 600px) { #toast { top: 70px; } }
     </style>
   </head>
   <body>

@@ -1,33 +1,38 @@
-// The world's resources: every hex carries an environment with surface stocks (collected,
-// regrowing) and subsurface deposits (for mines and quarries later), and individual props —
-// trees, bushes, rocks, reeds — are resource nodes villagers gather from directly.
+// The world's resources. Each hex has a ground pool (non-living things collected from the
+// surface; finite) and deposits below ground (for quarries and mines later). Every living
+// source is an individual in the world: plants and fixed animal sources (hives, nests,
+// shellfish beds) are resource nodes built from props; roaming animals are herds (animals.ts).
 
 import { ENVIRONMENT_BY_ID, type EnvironmentId } from './data/environments';
-import { FEATURE_BY_ID } from './data/features';
+import { FAUNA, FAUNA_BY_ID } from './data/fauna';
+import { FLORA_BY_ID } from './data/flora';
 import { MATERIAL_BY_ID, type Rarity } from './data/materials';
 import { HEX_SIZE, hexesInRadius, hexKey, hexToWorld, type Hex } from './hex';
 import { hash01 } from './rng';
 import type { Heightfield } from './terrain';
 import type { FlowField } from './testScene';
-import type { PropInstance } from './world';
+import type { PropInstance, PropKind } from './world';
 
 export interface HexResources {
   q: number;
   r: number;
   env: EnvironmentId;
-  /** Current surface stock per material. */
-  surface: Record<string, number>;
-  /** Stock the surface regrows toward. */
-  surfaceMax: Record<string, number>;
-  /** Untouched subsurface deposits (units). */
-  subsurface: Record<string, number>;
+  /** Ground pool: what is left to collect from the surface. */
+  ground: Record<string, number>;
+  /** What the ground pool started with. */
+  groundMax: Record<string, number>;
+  /** Untouched deposits below ground (units). */
+  below: Record<string, number>;
 }
+
+export type NodeKind = 'plant' | 'fixed' | 'ground';
 
 export interface ResourceNode {
   /** Index into world.props. */
   prop: number;
-  /** World feature kind (wild hive, bird nests, herb patch), if this node is one. */
-  feature?: string;
+  kind: NodeKind;
+  /** Plant or animal species id (none for loose rocks). */
+  species?: string;
   x: number;
   z: number;
   stock: Record<string, number>;
@@ -86,26 +91,26 @@ export function buildHexResources(seed: number, terrain: Heightfield, flow: Flow
     if (Math.abs(c.x) > half || Math.abs(c.z) > half) continue;
     const env = classifyHex(h, terrain, flow, trees.get(hexKey(h)) ?? 0);
     const e = ENVIRONMENT_BY_ID.get(env)!;
-    const surface: Record<string, number> = {};
-    const subsurface: Record<string, number> = {};
+    const ground: Record<string, number> = {};
+    const below: Record<string, number> = {};
     let ch = 0;
-    for (const [id, abundance] of Object.entries(e.surface)) {
+    for (const [id, abundance] of Object.entries(e.ground)) {
       ch++;
       const roll = hash01(seed, h.q * 131 + ch, h.r * 977);
       if (roll > abundance && abundance < 0.5) continue;
       const scale = RARITY_SCALE[MATERIAL_BY_ID.get(id)?.rarity ?? 'common'];
-      const amount = Math.round(abundance * 30 * scale * (0.5 + hash01(seed + 7, h.q, h.r * 31 + ch)));
-      if (amount > 0) surface[id] = amount;
+      const amount = Math.round(abundance * 160 * scale * (0.5 + hash01(seed + 7, h.q, h.r * 31 + ch)));
+      if (amount > 0) ground[id] = amount;
     }
-    for (const [id, abundance] of Object.entries(e.subsurface)) {
+    for (const [id, abundance] of Object.entries(e.below)) {
       ch++;
       const roll = hash01(seed + 3, h.q * 557 + ch, h.r * 211);
       if (roll > abundance) continue;
       const scale = RARITY_SCALE[MATERIAL_BY_ID.get(id)?.rarity ?? 'common'];
       const amount = Math.round(400 * abundance * scale * (0.4 + hash01(seed + 11, h.q * 3, h.r + ch)));
-      if (amount > 0) subsurface[id] = amount;
+      if (amount > 0) below[id] = amount;
     }
-    out.push({ q: h.q, r: h.r, env, surface, surfaceMax: { ...surface }, subsurface });
+    out.push({ q: h.q, r: h.r, env, ground, groundMax: { ...ground }, below });
   }
   return out;
 }
@@ -126,67 +131,77 @@ function worldHex(x: number, z: number): Hex {
   return { q: rq + 0, r: rr + 0 };
 }
 
-/** Resource nodes from props: deadwood on trees, berries on bushes, stone on rocks, reeds. */
+/** Which species each prop model stands for. Bushes are split between berry bushes and thickets. */
+function speciesFor(kind: PropKind): { kind: NodeKind; species?: string } | null {
+  switch (kind) {
+    case 'bush':
+      return { kind: 'plant', species: 'thicket' };
+    case 'berrybush':
+      return { kind: 'plant', species: 'berry-bush' };
+    case 'flowers':
+      return { kind: 'plant', species: 'wild-herbs' };
+    case 'apple':
+      return { kind: 'plant', species: 'wild-apple' };
+    case 'grain':
+      return { kind: 'plant', species: 'wild-grain' };
+    case 'tubers':
+      return { kind: 'plant', species: 'wild-tubers' };
+    case 'flax':
+      return { kind: 'plant', species: 'wild-flax' };
+    case 'rock':
+    case 'boulder':
+      return { kind: 'ground' };
+  }
+  if (FLORA_BY_ID.has(kind)) return { kind: 'plant', species: kind };
+  const fixed = FAUNA.find((f) => f.prop === kind);
+  if (fixed) return { kind: 'fixed', species: fixed.id };
+  return null;
+}
+
+/** Resource nodes from props: every plant, hive, nest, shellfish bed and loose rock. */
 export function buildNodes(seed: number, props: PropInstance[]): ResourceNode[] {
   const nodes: ResourceNode[] = [];
   props.forEach((p, i) => {
-    let stock: Record<string, number> | null = null;
-    let feature: string | undefined;
-    switch (p.kind) {
-      case 'oak':
-      case 'birch':
-        stock = { hardwood: 3 };
-        break;
-      case 'pine':
-        stock = { softwood: 3, resin: 2 };
-        break;
-      case 'bush':
-        // Berry bushes only (the renderer draws berries on some variants).
-        if (hash01(seed, i, 9) > 0.45) stock = { berries: 6 };
-        break;
-      case 'rock':
-        stock = hash01(seed, i, 5) > 0.6 ? { stone: 3, flint: 2 } : { stone: 4 };
-        break;
-      case 'boulder':
-        stock = { stone: 10, flint: hash01(seed, i, 6) > 0.5 ? 3 : 0 };
-        break;
-      case 'reeds':
-        stock = { reeds: 6 };
-        break;
-      case 'flowers':
-        feature = 'herb-patch';
-        break;
-      case 'beehive':
-        feature = 'wild-hive';
-        break;
-      case 'nest':
-        feature = 'bird-nests';
-        break;
+    const s = speciesFor(p.kind);
+    if (!s) return;
+    let stock: Record<string, number>;
+    if (s.kind === 'ground') {
+      stock = p.kind === 'boulder' ? { stone: 10, flint: hash01(seed, i, 6) > 0.5 ? 3 : 0 } : hash01(seed, i, 5) > 0.6 ? { stone: 3, flint: 2 } : { stone: 4 };
+    } else if (s.kind === 'plant') {
+      stock = { ...FLORA_BY_ID.get(s.species!)!.yields };
+    } else {
+      stock = { ...FAUNA_BY_ID.get(s.species!)!.yields };
     }
-    if (feature) stock = { ...FEATURE_BY_ID.get(feature)!.yields };
-    if (!stock) return;
     for (const k of Object.keys(stock)) if (!stock[k]) delete stock[k];
-    nodes.push({ prop: i, feature, x: p.x, z: p.z, stock, max: { ...stock } });
+    // Larger plants hold a little more.
+    if (s.kind === 'plant') for (const k of Object.keys(stock)) stock[k] = Math.max(1, Math.round(stock[k] * (0.7 + p.scale * 0.3)));
+    nodes.push({ prop: i, kind: s.kind, species: s.species, x: p.x, z: p.z, stock, max: { ...stock } });
   });
   return nodes;
 }
 
-/** Surface stocks and nodes regrow a little each game second (fully in about two days). */
-export function regrowResources(hexes: HexResources[], nodes: ResourceNode[], dt: number): void {
-  const rate = dt / 2400;
-  for (const h of hexes)
-    for (const id in h.surfaceMax) {
-      const cur = h.surface[id] ?? 0;
-      if (cur < h.surfaceMax[id]) h.surface[id] = Math.min(h.surfaceMax[id], cur + h.surfaceMax[id] * rate);
-    }
+/**
+ * Plants and fixed sources regrow at their own pace, scaled by the season; out of season,
+ * fruit, grain and other perishables left on the plant spoil. Loose rocks and the ground
+ * pool never grow back.
+ */
+export function regrowResources(nodes: ResourceNode[], season: number, dt: number): void {
   for (const n of nodes) {
-    // Wild features recover at their own (slower) pace.
-    const r = n.feature ? dt / FEATURE_BY_ID.get(n.feature)!.regrowSeconds : rate;
+    if (n.kind === 'ground' || !n.species) continue;
+    const plant = n.kind === 'plant' ? FLORA_BY_ID.get(n.species)! : null;
+    const animal = plant ? null : FAUNA_BY_ID.get(n.species)!;
     for (const id in n.max) {
+      // Bees and birds are quiet in winter.
+      const rate = plant
+        ? ((plant.itemSeasons?.[id] ?? plant.seasons)[season] * dt) / plant.regrowSeconds
+        : ((season === 3 ? 0.1 : 1) * dt) / (animal!.regrowSeconds ?? 2400);
       const cur = n.stock[id] ?? 0;
-      // Stone does not grow back; plants, deadwood, hives and nests do.
-      if (id === 'stone' || id === 'flint') continue;
-      if (cur < n.max[id]) n.stock[id] = Math.min(n.max[id], cur + n.max[id] * r);
+      if (rate > 0) {
+        if (cur < n.max[id]) n.stock[id] = Math.min(n.max[id], cur + n.max[id] * rate);
+      } else if (MATERIAL_BY_ID.get(id)?.perishable && cur > 0) {
+        n.stock[id] = Math.max(0, cur - n.max[id] * (dt / 1200));
+      }
     }
   }
 }
+

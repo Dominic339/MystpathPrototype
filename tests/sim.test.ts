@@ -112,8 +112,31 @@ describe('gathering simulation', () => {
     expect(w.hexes.length).toBeGreaterThan(200);
     const envs = new Set(w.hexes.map((h) => h.env));
     for (const e of ['river', 'riverbank', 'meadow', 'temperate-forest']) expect(envs.has(e as never), e).toBe(true);
-    const withSubsurface = w.hexes.filter((h) => Object.keys(h.subsurface).length > 0).length;
-    expect(withSubsurface).toBeGreaterThan(100);
+    const withBelow = w.hexes.filter((h) => Object.keys(h.below).length > 0).length;
+    expect(withBelow).toBeGreaterThan(100);
+  });
+
+  it('wild animals live, flee, breed and can be hunted', () => {
+    const w = createWorld(7);
+    const kinds = new Set(w.herds.map((h) => h.species));
+    for (const k of ['red-deer', 'hare', 'wild-fowl', 'river-fish']) expect(kinds.has(k), k).toBe(true);
+    const start = Object.fromEntries(w.herds.map((h) => [h.id, { x: h.x, z: h.z }]));
+    for (let i = 0; i < 4800; i++) tick(w, 0.5); // two days
+    const moved = w.herds.filter((h) => Math.hypot(h.x - start[h.id].x, h.z - start[h.id].z) > 2).length;
+    expect(moved).toBeGreaterThan(w.herds.length / 2);
+    // Meat only arrives through hunting animals, so hunters must have caught something.
+    expect(w.seen).toContain('game-meat');
+  });
+
+  it('villagers make discoveries from their work and build inventions', () => {
+    const w = createWorld(7);
+    for (let i = 0; i < 2400 * 8; i++) tick(w, 0.5); // eight days
+    expect(w.discoveries.length).toBeGreaterThan(0);
+    expect(w.events.some((e) => e.text.includes('discovered'))).toBe(true);
+    // At most two discoveries a day.
+    const perDay = new Map<number, number>();
+    for (const e of w.discoveryLog) perDay.set(e.day, (perDay.get(e.day) ?? 0) + 1);
+    for (const n of perDay.values()) expect(n).toBeLessThanOrEqual(2);
   });
 
   it('paths avoid water', () => {
