@@ -90,3 +90,36 @@ describe('save and load', () => {
     expect(restored.villagers).toEqual(w.villagers);
   });
 });
+
+describe('gathering simulation', () => {
+  it('villagers choose jobs, gather and fill the stockpile over a day', () => {
+    const w = createWorld(7);
+    const start = { ...w.stockpile };
+    const jobs = new Set<string>();
+    for (let i = 0; i < 2400; i++) {
+      tick(w, 0.5); // one full in-game day
+      for (const v of w.villagers) if (v.job) jobs.add(v.job);
+    }
+    const gained = Object.keys(w.stockpile).filter((id) => (w.stockpile[id] ?? 0) > (start[id] ?? 0));
+    expect(jobs.size).toBeGreaterThanOrEqual(4);
+    expect(gained.length).toBeGreaterThanOrEqual(5);
+    expect(Math.max(...w.nav.wear)).toBeGreaterThan(0.1); // footpaths are forming
+    for (const v of w.villagers) expect(v.hunger).toBeLessThan(0.95); // nobody starves
+  });
+
+  it('every hex in the valley has an environment and resources', () => {
+    const w = createWorld(7);
+    expect(w.hexes.length).toBeGreaterThan(200);
+    const envs = new Set(w.hexes.map((h) => h.env));
+    for (const e of ['river', 'riverbank', 'meadow', 'temperate-forest']) expect(envs.has(e as never), e).toBe(true);
+    const withSubsurface = w.hexes.filter((h) => Object.keys(h.subsurface).length > 0).length;
+    expect(withSubsurface).toBeGreaterThan(100);
+  });
+
+  it('paths avoid water', () => {
+    const w = createWorld(7);
+    const c = w.camp.center;
+    const p = w.nav.findPath(c.x, c.z, c.x + 60, c.z - 60);
+    if (p) for (const pt of p) expect(w.terrain.sample(pt.x, pt.z)).toBeGreaterThan(w.terrain.waterLevel);
+  });
+});

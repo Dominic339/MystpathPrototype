@@ -5,8 +5,9 @@ import { Heightfield } from './terrain';
 import { GameClock } from './time';
 import type { World } from './world';
 import { buildTestScene } from './testScene';
+import { NavGrid } from './pathfinding';
 
-export const SAVE_VERSION = 1;
+export const SAVE_VERSION = 2;
 
 export interface SaveFile {
   version: number;
@@ -16,6 +17,10 @@ export interface SaveFile {
   terrain: { res: number; size: number; waterLevel: number; heights: string };
   props: World['props'];
   camp: World['camp'];
+  hexes: World['hexes'];
+  nodes: World['nodes'];
+  stockpile: World['stockpile'];
+  wear: string;
   villagers: World['villagers'];
 }
 
@@ -33,7 +38,11 @@ export function saveWorld(world: World): SaveFile {
     },
     props: world.props,
     camp: world.camp,
-    villagers: world.villagers.map((v) => ({ ...v })),
+    hexes: world.hexes,
+    nodes: world.nodes,
+    stockpile: world.stockpile,
+    wear: encodeFloats(world.nav.wear),
+    villagers: world.villagers,
   };
 }
 
@@ -42,16 +51,24 @@ export function loadWorld(save: SaveFile): World {
   const rng = new Rng(0);
   rng.setState(save.rngState);
   const t = save.terrain;
+  const terrain = new Heightfield(t.res, t.size, decodeFloats(t.heights), t.waterLevel);
+  const nav = new NavGrid(terrain);
+  nav.wear = decodeFloats(save.wear);
+  const clone = <T>(x: T): T => JSON.parse(JSON.stringify(x));
   return {
     seed: save.seed,
     clock: new GameClock(save.clock.totalSeconds, save.clock.speed),
     rng,
-    terrain: new Heightfield(t.res, t.size, decodeFloats(t.heights), t.waterLevel),
+    terrain,
     props: save.props,
     camp: save.camp,
     // The current is derived from the scene layout, so it is rebuilt rather than saved.
     flow: buildTestScene(save.seed).flow,
-    villagers: save.villagers.map((v) => ({ ...v })),
+    hexes: clone(save.hexes),
+    nodes: clone(save.nodes),
+    stockpile: clone(save.stockpile),
+    nav,
+    villagers: clone(save.villagers),
   };
 }
 

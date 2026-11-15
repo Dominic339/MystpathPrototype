@@ -26,6 +26,9 @@ const LOOKS: Look[] = [
   { skin: '#6f452c', hair: '#0f0b09', tunic: '#b08a5e', trim: '#e2d2b0', wraps: '#55402e', build: 1.05, height: 1.01, hairStyle: 'short' },
 ];
 
+/** Bundle colours by material category: stone, ore, minerals, gems, water, plants, animal, magic. */
+const CARRY_COLORS = ['#8d877c', '#6e5a4e', '#4a4440', '#8a5fb0', '#5d7fa0', '#7a6a3a', '#9a6a46', '#5fb0c0'];
+
 const THIGH = 0.44;
 const SHIN = 0.42;
 const ANKLE = 0.07;
@@ -99,6 +102,10 @@ export interface Figure {
   /** Pose being shown, eased toward each new target so transitions are smooth. */
   current: PoseParams | null;
   walkBlend: number;
+  vx: number;
+  vz: number;
+  carry: number;
+  bundle: THREE.Mesh;
   x: number;
   z: number;
   heading: number;
@@ -261,6 +268,11 @@ export function makeFigure(lookIndex: number, seed: number): Figure {
     mesh(head, new THREE.SphereGeometry(0.11, 12, 8, 0, Math.PI * 2, Math.PI * 0.45, Math.PI * 0.3), hairM, 0, 0.16, -0.03); // hair to the nape
   }
 
+  // A bundle carried on the back when bringing materials home.
+  const bundle = mesh(spine, new THREE.CapsuleGeometry(0.13, 0.22, 3, 8), mat('#8a6a46', 0.95), 0, 0.3, -0.2);
+  bundle.rotation.z = Math.PI / 2;
+  bundle.visible = false;
+
   root.scale.setScalar(look.height);
   return {
     root,
@@ -279,6 +291,10 @@ export function makeFigure(lookIndex: number, seed: number): Figure {
     skirtR,
     current: null,
     walkBlend: 0,
+    vx: 0,
+    vz: 0,
+    carry: -1,
+    bundle,
     x: 0,
     z: 0,
     heading: 0,
@@ -356,16 +372,26 @@ export function buildVillagers(looks: number[], terrain: Heightfield): VillagerV
     return f;
   });
   let initialised = false;
+  let tickAt = performance.now();
 
   return {
     group,
     positionOf: (i) => (figures[i] ? figures[i].root.position.clone() : null),
     setTargets(buf) {
+      tickAt = performance.now();
       figures.forEach((f, k) => {
-        f.tx = buf[k * VILLAGER_STRIDE];
-        f.tz = buf[k * VILLAGER_STRIDE + 1];
-        f.theading = buf[k * VILLAGER_STRIDE + 2];
-        f.activity = buf[k * VILLAGER_STRIDE + 3];
+        const o = k * VILLAGER_STRIDE;
+        f.tx = buf[o];
+        f.tz = buf[o + 1];
+        f.theading = buf[o + 2];
+        f.activity = buf[o + 3];
+        f.vx = buf[o + 4];
+        f.vz = buf[o + 5];
+        if (f.carry !== buf[o + 6]) {
+          f.carry = buf[o + 6];
+          f.bundle.visible = f.carry >= 0;
+          if (f.carry >= 0) f.bundle.material = mat(CARRY_COLORS[f.carry] ?? '#8a6a46', 0.95);
+        }
         if (!initialised) {
           f.x = f.tx;
           f.z = f.tz;
@@ -375,22 +401,32 @@ export function buildVillagers(looks: number[], terrain: Heightfield): VillagerV
       initialised = true;
     },
     update(dt, time) {
+      const since = (performance.now() - tickAt) / 1000;
       for (const f of figures) {
-        const k = Math.min(1, dt * 8);
+        // Predict where the simulation has them now (last position + velocity), then ease
+        // toward it: smooth motion between the simulation's 10 updates per second.
+        const px = f.tx + f.vx * Math.min(0.3, since);
+        const pz = f.tz + f.vz * Math.min(0.3, since);
+        const k = Math.min(1, dt * 10);
         const ox = f.x;
         const oz = f.z;
-        f.x += (f.tx - f.x) * k;
-        f.z += (f.tz - f.z) * k;
-        let dh = f.theading - f.heading;
+        f.x += (px - f.x) * k;
+        f.z += (pz - f.z) * k;
+        const moving = Math.hypot(f.vx, f.vz) > 0.1;
+        const want = moving ? Math.atan2(f.vx, f.vz) : f.theading;
+        let dh = want - f.heading;
         dh = Math.atan2(Math.sin(dh), Math.cos(dh));
-        f.heading += dh * Math.min(1, dt * 6);
+        f.heading += dh * Math.min(1, dt * 8);
         f.root.position.set(f.x, terrain.sample(f.x, f.z), f.z);
         f.root.rotation.y = f.heading;
+        const actName = ACTIVITY_CODES[f.activity] ?? 'resting';
+        // Asleep in the tent.
+        f.root.visible = actName !== 'sleeping';
 
         // Drive the walk cycle from the distance actually covered, so feet never slide.
         const moved = Math.hypot(f.x - ox, f.z - oz);
         const speed = dt > 0 ? moved / dt : 0;
-        const act = ACTIVITY_CODES[f.activity] ?? 'resting';
+        const act = actName;
         const walking = act === 'walking' && speed > 0.15;
         f.walkBlend += ((walking ? 1 : 0) - f.walkBlend) * Math.min(1, dt * 6);
         const STRIDE = 1.55; // metres per full cycle (two steps)
@@ -417,6 +453,10 @@ export function buildVillagers(looks: number[], terrain: Heightfield): VillagerV
         if (act === 'gathering') {
           const pick = Math.sin(time * 3 + f.phase);
           target = { tl: 0.55, tr: 0.25, kl: 0.9, kr: 0.45, sl: 1.0 + pick * 0.2, sr: 0.8 - pick * 0.2, el: 0.6, er: 0.9, spine: 0.55 + Math.sin(time * 2.2 + f.phase) * 0.08, bob: 0, headYaw: 0 };
+        } else if (act === 'crafting') {
+          // Kneel at the fire or work spot, hands busy in front.
+          const work = Math.sin(time * 4 + f.phase);
+          target = { tl: 1.25, tr: 0.2, kl: 2.0, kr: 1.75, sl: 0.9 + work * 0.15, sr: 0.75 - work * 0.15, el: 0.9, er: 1.0, spine: 0.3, bob: 0, headYaw: 0 };
         } else if (act === 'fetching-water') {
           target = { tl: 1.35, tr: 1.0, kl: 2.2, kr: 1.9, sl: 1.1, sr: 1.25, el: 0.4, er: 0.5, spine: 0.4, bob: 0, headYaw: 0 };
         } else {

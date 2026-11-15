@@ -7,6 +7,7 @@ import { smoothstep } from '../sim/terrain';
 import type { CampLayout, PropInstance } from '../sim/world';
 import { Noise2D } from '../sim/noise';
 import { color, mix } from './geom';
+import { globalUniforms } from './materials';
 
 const GRASS_LUSH = color('#4a6e2c');
 const GRASS_DRY = color('#8c8f4a');
@@ -60,8 +61,7 @@ export function buildTerrain(field: Heightfield, camp: CampLayout, props: PropIn
     const campD = Math.hypot(x - camp.center.x, z - camp.center.z);
     const campWear = 1 - smoothstep(6 + nf * 4, 13 + nv * 3, campD);
     mix(c, mix(DIRT, DIRT_PACKED, nf), campWear * 0.9, c);
-    const path = pathWear(x, z, camp, field) * (0.6 + nf * 0.4);
-    mix(c, DIRT, path * 0.75, c);
+    const path = 0; // footpaths now come from the simulation (worn by villagers)
 
     // Wet banks and underwater silt.
     const bank = 1 - smoothstep(0.15, 1.2 + nv * 0.6, above);
@@ -88,6 +88,8 @@ export function buildTerrain(field: Heightfield, camp: CampLayout, props: PropIn
 
   const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, metalness: 0 });
   mat.onBeforeCompile = (shader) => {
+    shader.uniforms.uWear = globalUniforms.uWear;
+    shader.uniforms.uWorldSize = globalUniforms.uWorldSize;
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', '#include <common>\nvarying vec3 vTerrainPos;')
       .replace('#include <begin_vertex>', '#include <begin_vertex>\nvTerrainPos = (modelMatrix * vec4(transformed, 1.0)).xyz;');
@@ -96,6 +98,8 @@ export function buildTerrain(field: Heightfield, camp: CampLayout, props: PropIn
         '#include <common>',
         `#include <common>
         varying vec3 vTerrainPos;
+        uniform sampler2D uWear;
+        uniform float uWorldSize;
         float tHash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
         float tNoise(vec2 p) {
           vec2 i = floor(p); vec2 f = fract(p);
@@ -107,7 +111,11 @@ export function buildTerrain(field: Heightfield, camp: CampLayout, props: PropIn
         '#include <color_fragment>',
         `#include <color_fragment>
         float grain = tNoise(vTerrainPos.xz * 1.7) * 0.6 + tNoise(vTerrainPos.xz * 6.3) * 0.4;
-        diffuseColor.rgb *= 0.86 + grain * 0.26;`,
+        diffuseColor.rgb *= 0.86 + grain * 0.26;
+        // Footpaths worn by villagers: packed dirt with ragged edges.
+        float worn = texture2D(uWear, vTerrainPos.xz / uWorldSize + 0.5).r;
+        float pathMix = smoothstep(0.12, 0.55, worn + (tNoise(vTerrainPos.xz * 2.3) - 0.5) * 0.18);
+        diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.17, 0.11, 0.06) * (0.9 + grain * 0.25), pathMix * 0.85);`,
       );
   };
   const mesh = new THREE.Mesh(geo, mat);
@@ -152,25 +160,4 @@ function sampleDensity(g: DensityGrid, field: Heightfield, x: number, z: number)
   const tz = fz - j;
   const at = (a: number, b: number) => (a < 0 || b < 0 || a >= g.n || b >= g.n ? 0 : g.cells[b * g.n + a]);
   return (at(i, j) * (1 - tx) + at(i + 1, j) * tx) * (1 - tz) + (at(i, j + 1) * (1 - tx) + at(i + 1, j + 1) * tx) * tz;
-}
-
-/** Footpaths worn from camp to the river and toward the forest. */
-function pathWear(x: number, z: number, camp: CampLayout, field: Heightfield): number {
-  const c = camp.center;
-  const targets = [
-    { x: c.x + 14, z: c.z - 22 }, // down to the river
-    { x: c.x - 30, z: c.z + 24 }, // toward the woods
-  ];
-  let best = 0;
-  for (const t of targets) {
-    const dx = t.x - c.x;
-    const dz = t.z - c.z;
-    const u = Math.max(0, Math.min(1, ((x - c.x) * dx + (z - c.z) * dz) / (dx * dx + dz * dz)));
-    // Gentle curve along the path.
-    const px = c.x + dx * u + Math.sin(u * Math.PI) * 3;
-    const pz = c.z + dz * u;
-    const d = Math.hypot(x - px, z - pz);
-    best = Math.max(best, (1 - smoothstep(0.6, 1.6, d)) * (1 - smoothstep(0.85, 1, u)));
-  }
-  return best * (field.sample(x, z) > field.waterLevel ? 1 : 0);
 }

@@ -62,7 +62,7 @@ function tuftGeometry(): THREE.BufferGeometry {
 
 export function buildGrass(field: Heightfield, terrainMesh: THREE.Mesh, grassWeight: Float32Array, count = 48000): THREE.InstancedMesh {
   const geo = tuftGeometry();
-  const mat = natureMaterial({ sway: 0.35, roughness: 1 });
+  const mat = natureMaterial({ sway: 0.35, roughness: 1, trample: true });
   const mesh = new THREE.InstancedMesh(geo, mat, count);
   const rng = new Rng(808);
   const half = field.size / 2 - 2;

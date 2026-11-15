@@ -17,6 +17,10 @@ Restarted from scratch on a web stack (the old Unity prototype was removed).
   with a full day-night cycle. Water is simulated: a wave simulation carries ripples,
   splashes and wakes, the river current flows toward the lake, and a canoe floats, drifts
   and leaves a wake.
+- **Resources and gathering (pulled forward from milestone 7):** all 102 base materials with
+  environments, acquisition methods and processing recipes in data (`src/sim/data`); a hex
+  resource map (surface and subsurface); hunter-gatherers who choose their own jobs, gather,
+  process at camp, eat and sleep; footpaths that wear in where they walk.
 - Next: milestone 3, procedural world generation.
 
 ## Running it
@@ -43,7 +47,8 @@ npm run screenshot # renders ./screenshots (after a build; needs Chrome)
 | H | Toggle the hex grid |
 | P | Download a save file |
 | Double-click water | Splash into the wave simulation |
-| Toolbar | Speed, skip time, hex grid, follow the airship / canoe / camp |
+| Click / tap the ground | Inspect that hex: environment, surface and underground resources |
+| Toolbar | Speed, skip time, hex grid, stats panel, follow the airship / canoe / camp |
 
 Touch (testing only — the game targets PC): drag pans, pinch zooms, twist rotates,
 two fingers up/down tilt, double-tap water to splash. Phones get a lighter graphics mode.

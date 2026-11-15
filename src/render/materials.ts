@@ -9,7 +9,16 @@ export const globalUniforms = {
   uWind: { value: 1 },
   uSunDir: { value: new THREE.Vector3(0.5, 0.8, 0.3).normalize() },
   uSunColor: { value: new THREE.Color(1, 1, 1) },
+  /** Footpath wear from the simulation (0 = untouched, 1 = worn dirt path). */
+  uWear: { value: blankTexture() as THREE.Texture },
+  uWorldSize: { value: 320 },
 };
+
+function blankTexture(): THREE.DataTexture {
+  const t = new THREE.DataTexture(new Uint8Array([0]), 1, 1, THREE.RedFormat);
+  t.needsUpdate = true;
+  return t;
+}
 
 const LEAF_NOISE = /* glsl */ `
   float lHash(vec3 p) { return fract(sin(dot(p, vec3(17.1, 113.7, 271.3))) * 43758.5453); }
@@ -99,7 +108,7 @@ export function leafMaterial(sway: number, density = 1): { material: THREE.MeshS
  * Sway grows with height above the model's base, so trunks stay planted and canopies move.
  */
 export function natureMaterial(
-  opts: { sway?: number; roughness?: number; flat?: boolean; side?: THREE.Side; grain?: number; grainScale?: number } = {},
+  opts: { sway?: number; roughness?: number; flat?: boolean; side?: THREE.Side; grain?: number; grainScale?: number; trample?: boolean } = {},
 ): THREE.MeshStandardMaterial {
   const mat = new THREE.MeshStandardMaterial({
     vertexColors: true,
@@ -117,8 +126,10 @@ export function natureMaterial(
     shader.uniforms.uSway = { value: sway };
     shader.uniforms.uGrain = { value: grain };
     shader.uniforms.uGrainScale = { value: grainScale };
+    shader.uniforms.uWear = globalUniforms.uWear;
+    shader.uniforms.uWorldSize = globalUniforms.uWorldSize;
     shader.vertexShader = shader.vertexShader
-      .replace('#include <common>', '#include <common>\nuniform float uTime;\nuniform float uWind;\nuniform float uSway;\nvarying vec3 vGrainPos;')
+      .replace('#include <common>', '#include <common>\nuniform float uTime;\nuniform float uWind;\nuniform float uSway;\nuniform sampler2D uWear;\nuniform float uWorldSize;\nvarying vec3 vGrainPos;')
       .replace(
         '#include <begin_vertex>',
         `#include <begin_vertex>
@@ -132,7 +143,8 @@ export function natureMaterial(
         float gust = 0.65 + 0.35 * sin(uTime * 0.31 + swayOrigin.x * 0.013);
         float swayAmt = uSway * uWind * gust * swayH * swayH;
         transformed.x += (sin(swayPh) + 0.35 * sin(swayPh * 2.7 + transformed.z)) * swayAmt;
-        transformed.z += cos(swayPh * 0.83) * swayAmt * 0.7;`,
+        transformed.z += cos(swayPh * 0.83) * swayAmt * 0.7;
+        ${opts.trample ? 'float worn = texture2D(uWear, swayOrigin.xz / uWorldSize + 0.5).r; transformed *= 1.0 - smoothstep(0.1, 0.6, worn) * 0.92;' : ''}`,
       )
       .replace(
         '#include <project_vertex>',
@@ -165,7 +177,7 @@ export function natureMaterial(
         diffuseColor.rgb *= 1.0 - uGrain + gn * uGrain * 1.6;`,
       );
   };
-  mat.customProgramCacheKey = () => `nature-${sway}-${grain}-${grainScale}`;
+  mat.customProgramCacheKey = () => `nature-${sway}-${grain}-${grainScale}-${opts.trample ? 1 : 0}`;
   return mat;
 }
 

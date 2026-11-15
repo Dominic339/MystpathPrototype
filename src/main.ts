@@ -19,7 +19,8 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { Heightfield } from './sim/terrain';
 import { calendar, CYCLE_SECONDS, DAY_SECONDS } from './sim/time';
-import { VILLAGER_STRIDE, type FromSim, type ToSim } from './sim/protocol';
+import { VILLAGER_STRIDE, type FromSim, type HexInfo, type Stats, type ToSim } from './sim/protocol';
+import { hexCorners, worldToHex, type Hex } from './sim/hex';
 import { buildTerrain } from './render/terrainMesh';
 import { WaterSystem } from './render/water';
 import { buildBoat, type BoatView } from './render/boat';
@@ -173,13 +174,17 @@ let simSeconds = startSeconds;
 let simSpeed = startSpeed;
 let lastTickAt = performance.now();
 let framesSinceWorld = -1;
+let terrainMesh: THREE.Mesh | null = null;
+let latestStats: Stats | null = null;
 
 worker.onmessage = (e: MessageEvent<FromSim>) => {
   const msg = e.data;
   if (msg.type === 'world') {
     const t = msg.terrain;
     terrain = new Heightfield(t.res, t.size, t.heights, t.waterLevel);
+    globalUniforms.uWorldSize.value = t.size;
     const built = buildTerrain(terrain, msg.camp, msg.props);
+    terrainMesh = built.mesh;
     scene.add(built.mesh);
     scene.add(buildGrass(terrain, built.mesh, built.grassWeight, lowQuality ? 18000 : 48000));
     water = new WaterSystem(terrain, msg.flow);
@@ -216,6 +221,20 @@ worker.onmessage = (e: MessageEvent<FromSim>) => {
         water?.disturb(msg.villagers[k] + Math.sin(h) * 1.2, msg.villagers[k + 1] + Math.cos(h) * 1.2, -0.05, 0.6);
       }
     }
+  } else if (msg.type === 'wear') {
+    // Footpaths: wear from the simulation drawn on the terrain and flattening the grass.
+    const bytes = new Uint8Array(msg.n * msg.n);
+    for (let k = 0; k < bytes.length; k++) bytes[k] = Math.min(255, Math.round(Math.min(1, msg.data[k]) * 255));
+    const tex = new THREE.DataTexture(bytes, msg.n, msg.n, THREE.RedFormat);
+    tex.magFilter = tex.minFilter = THREE.LinearFilter;
+    tex.needsUpdate = true;
+    globalUniforms.uWear.value.dispose();
+    globalUniforms.uWear.value = tex;
+  } else if (msg.type === 'stats') {
+    latestStats = msg.stats;
+    if (panel.style.display !== 'none') renderPanel();
+  } else if (msg.type === 'hexInfo') {
+    showHexInfo(msg.info);
   } else if (msg.type === 'saved') {
     const blob = new Blob([msg.json], { type: 'application/json' });
     const a = document.createElement('a');
@@ -248,12 +267,83 @@ function splashAt(clientX: number, clientY: number): void {
 }
 renderer.domElement.addEventListener('dblclick', (e) => splashAt(e.clientX, e.clientY));
 let lastTap = 0;
+let downAt = { x: 0, y: 0, t: 0 };
+renderer.domElement.addEventListener('pointerdown', (e) => (downAt = { x: e.clientX, y: e.clientY, t: performance.now() }));
 renderer.domElement.addEventListener('pointerup', (e) => {
-  if (e.pointerType !== 'touch') return;
   const now = performance.now();
-  if (now - lastTap < 320) splashAt(e.clientX, e.clientY);
-  lastTap = now;
+  const tap = Math.hypot(e.clientX - downAt.x, e.clientY - downAt.y) < 6 && now - downAt.t < 400;
+  if (e.pointerType === 'touch' && now - lastTap < 320) {
+    splashAt(e.clientX, e.clientY);
+    lastTap = 0;
+    return;
+  }
+  if (e.pointerType === 'touch') lastTap = now;
+  if (tap && e.button === 0) selectHexAt(e.clientX, e.clientY);
 });
+
+// Tap a hex to see its environment and what lies on and under it.
+let selection: THREE.LineLoop | null = null;
+function selectHexAt(clientX: number, clientY: number): void {
+  if (!terrainMesh || !terrain) return;
+  const ndc = new THREE.Vector2((clientX / window.innerWidth) * 2 - 1, -(clientY / window.innerHeight) * 2 + 1);
+  raycaster.setFromCamera(ndc, camera);
+  const hit = raycaster.intersectObject(terrainMesh, false)[0];
+  if (!hit) return;
+  const h: Hex = worldToHex(hit.point.x, hit.point.z);
+  send({ type: 'inspectHex', q: h.q, r: h.r });
+  if (selection) scene.remove(selection);
+  const pts = hexCorners(h).map((c) => new THREE.Vector3(c.x, Math.max(terrain!.waterLevel, terrain!.sample(c.x, c.z)) + 0.3, c.z));
+  selection = new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints(pts), new THREE.LineBasicMaterial({ color: '#ffd36b', depthTest: false }));
+  selection.renderOrder = 10;
+  scene.add(selection);
+}
+const hexCard = document.getElementById('hexcard')!;
+function showHexInfo(info: HexInfo | null): void {
+  if (!info) {
+    hexCard.style.display = 'none';
+    return;
+  }
+  const list = (items: { name: string; qty: number; max?: number }[]) =>
+    items.length ? items.map((i) => `<li><span>${i.name}</span><b>${i.qty}${i.max !== undefined ? ` / ${Math.round(i.max)}` : ''}</b></li>`).join('') : '<li class="quiet">None</li>';
+  hexCard.innerHTML = `<button class="close" aria-label="Close">×</button><h3>${info.environment}</h3>
+    <h4>On the surface</h4><ul>${list(info.surface)}</ul>
+    <h4>Below ground</h4><ul>${list(info.subsurface)}</ul>`;
+  hexCard.style.display = 'block';
+  hexCard.querySelector('.close')!.addEventListener('click', () => {
+    hexCard.style.display = 'none';
+    if (selection) scene.remove(selection);
+  });
+}
+
+// Stats panel: the stockpile and every villager — the stats-first view of the civilization.
+const panel = document.getElementById('panel')!;
+panel.style.display = params.get('stats') === '1' ? 'block' : 'none';
+function renderPanel(): void {
+  const st = latestStats;
+  if (!st) return;
+  const groups = new Map<string, { name: string; qty: number }[]>();
+  for (const item of st.stockpile) {
+    if (!groups.has(item.group)) groups.set(item.group, []);
+    groups.get(item.group)!.push(item);
+  }
+  const stock = [...groups.entries()]
+    .map(([g, items]) => `<h4>${g}</h4><ul>${items.map((i) => `<li><span>${i.name}</span><b>${i.qty}</b></li>`).join('')}</ul>`)
+    .join('');
+  const pct = (x: number) => `${Math.round(x * 100)}%`;
+  const people = st.villagers
+    .map(
+      (v) => `<div class="person"><div class="row"><b>${v.name}</b><span class="quiet">loves ${v.passion}</span></div>
+      <div class="row"><span>${v.job ?? (v.activity === 'sleeping' ? 'Sleeping' : 'Resting')}</span><span class="quiet">fed ${pct(1 - v.hunger)} · fulfilled ${pct(v.fulfilment)}</span></div>
+      ${v.carrying ? `<div class="quiet">Carrying ${v.carrying}</div>` : ''}
+      <div class="quiet">Priorities: ${v.priorities.slice(0, 3).join(', ') || '—'}</div>
+      ${v.skills.length ? `<div class="quiet">Skills: ${v.skills.map((s) => `${s.job} ${s.level}`).join(', ')}</div>` : ''}</div>`,
+    )
+    .join('');
+  panel.innerHTML = `<button class="close" aria-label="Close">×</button><h3>Civilization</h3>
+    <div class="quiet">Food on hand: ${st.food.toFixed(1)} days for one person</div>
+    <h3>People</h3>${people}<h3>Stockpile</h3>${stock}`;
+  panel.querySelector('.close')!.addEventListener('click', () => (panel.style.display = 'none'));
+}
 
 // Toolbar (also the way to reach these actions on a phone).
 const toolbar = document.getElementById('toolbar')!;
@@ -271,6 +361,10 @@ const speedButton = button('Speed 1×', () => {
 });
 button('Skip time', () => send({ type: 'setTime', totalSeconds: simSeconds + CYCLE_SECONDS / 8 }));
 button('Hex grid', () => hexOverlay && (hexOverlay.visible = !hexOverlay.visible));
+button('Stats', () => {
+  panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+  renderPanel();
+});
 const followButtons: HTMLButtonElement[] = [];
 const followTarget = (b: HTMLButtonElement, target: () => THREE.Vector3 | null, distance: number) => {
   const active = b.classList.contains('on');
