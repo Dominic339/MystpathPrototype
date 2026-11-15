@@ -256,7 +256,8 @@ export function buildWorld(seed: number): Scene {
   };
 
   const camp = layoutCamp(terrain, L.camp);
-  const props = scatter(seed, terrain, n, envAt, L.camp);
+  // Nothing but water plants stands in the water (a few guaranteed plants could land there).
+  const props = scatter(seed, terrain, n, envAt, L.camp).filter((p) => p.kind === 'reeds' || p.kind === 'seaweed' || p.kind === 'shellfish' || terrain.sample(p.x, p.z) > terrain.waterLevel + 0.15);
   const herds = spawnHerdsIn(seed, terrain, L.camp, envAt);
   return { terrain, props, camp, flow: buildFlow(terrain, L), herds, river: L.river, lake: L.lake, biome };
 }

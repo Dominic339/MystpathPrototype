@@ -22,13 +22,14 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { Heightfield } from './sim/terrain';
 import { calendar, CYCLE_SECONDS, DAY_SECONDS } from './sim/time';
-import { VILLAGER_STRIDE, type FromSim, type HexInfo, type Stats, type ToSim } from './sim/protocol';
+import { VILLAGER_STRIDE, type FromSim, type HexInfo, type Stats, type StructureView, type ToSim } from './sim/protocol';
 import { hexCorners, worldToHex, type Hex } from './sim/hex';
 import { buildTerrain } from './render/terrainMesh';
 import { WaterSystem } from './render/water';
 import { buildBoat, canoeGeometry, type BoatMode, type BoatView } from './render/boat';
 import { natureMaterial } from './render/materials';
 import { buildSky, skyState } from './render/sky';
+import { LINES } from './sim/data/structures';
 import { buildVegetation, type Vegetation } from './render/vegetation';
 import { buildGrass } from './render/grass';
 import { buildCamp, type CampBuild } from './render/camp';
@@ -203,6 +204,7 @@ let villagers: VillagerView | null = null;
 let animals: AnimalsView | null = null;
 let town: TownView | null = null;
 let vegetation: Vegetation | null = null;
+let gallery: StructureView[] | null = null;
 let hexOverlay: THREE.LineSegments | null = null;
 // Inventions only appear once the band has built them.
 const airship = buildAirship();
@@ -237,6 +239,23 @@ worker.onmessage = (e: MessageEvent<FromSim>) => {
     scene.add(town.group);
     vegetation = buildVegetation(msg.props, terrain);
     scene.add(vegetation);
+    if (params.has('gallery')) {
+      // Preview: every building of an age laid out in rows on cleared ground.
+      const era = params.get('gallery')!;
+      const at = (params.get('galleryAt') ?? '').split(',').map(Number);
+      const cx = Number.isFinite(at[0]) && at.length === 2 ? at[0] : msg.camp.center.x;
+      const cz = Number.isFinite(at[1]) && at.length === 2 ? at[1] : msg.camp.center.z;
+      const tiers = LINES.flatMap((l) => l.tiers.filter((t) => t.era === era).map((t) => ({ line: l.id, model: t.model })));
+      const cols = Math.ceil(Math.sqrt(tiers.length));
+      const sp = Number(params.get('gallerySpacing') ?? 15);
+      gallery = tiers.map((t, i) => ({
+        id: i + 1, line: t.line, model: t.model, built: 1, previous: null, variant: Number(params.get('variant') ?? i % 4), animals: 3,
+        x: cx + ((i % cols) - (cols - 1) / 2) * sp, z: cz + (Math.floor(i / cols) - (cols - 1) / 2) * sp, rot: 0,
+      }));
+      const r = (cols / 2 + 1) * sp;
+      vegetation.hide(msg.props.flatMap((p, i) => (Math.abs(p.x - cx) < r && Math.abs(p.z - cz) < r ? [i] : [])));
+      town.setStructures(gallery);
+    }
     camp = buildCamp(msg.camp, terrain);
     scene.add(camp.group);
     villagers = buildVillagers(
@@ -325,7 +344,7 @@ worker.onmessage = (e: MessageEvent<FromSim>) => {
     if (latest && prev && prev.events[0]?.text !== latest.text) toast(latest.text);
     if (panel.style.display !== 'none') renderPanel();
   } else if (msg.type === 'structures') {
-    town?.setStructures(msg.list);
+    town?.setStructures(gallery ?? msg.list);
     vegetation?.hide(msg.cleared);
     const l = msg.list.find((s) => s.model === 'landing' || s.previous === 'landing') ?? msg.list.find((s) => s.line === 'port');
     landingSpot = l && l.built >= 1 ? { x: l.x, z: l.z, rot: l.rot } : null;

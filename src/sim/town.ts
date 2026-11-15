@@ -122,6 +122,11 @@ export function buildingWants(world: World): Record<string, number> {
 const FOOTPRINT: Partial<Record<string, number>> = {
   'garden-plots': 7, 'fibre-plots': 6, fold: 7, quarry: 6, 'clay-pit': 5, 'woodcutters-camp': 5, 'hunting-lodge': 4.5, roundhouse: 3.6,
   'stone-yard': 5, 'canoe-yard': 5, landing: 3, 'storage-pits': 3, 'herb-garden': 4, pigsty: 4, coop: 3, well: 2.5,
+  // Later ages: fields, yards, docks and factories are bigger than a house.
+  longhouse: 4.6, ropewalk: 5.5, 'timber-bridge': 5, 'stone-bridge': 5.5, 'iron-bridge': 6, 'ploughed-fields': 7, 'open-fields': 8, orchard: 6, 'spice-plantation': 6,
+  'cattle-pasture': 7, 'quarry-crane': 5.5, shipyard: 6, harbour: 5, terrace: 5, apartments: 4.8, plantation: 6.5, 'quarry-blast': 6, 'mech-farm': 7.5, 'dairy-farm': 7,
+  'coke-ovens': 5.5, foundry: 5.5, 'textile-mill': 5.5, manufactory: 5.5, refinery: 5.5, 'steel-shipyard': 6.5, 'airship-yard': 5.5, 'airship-works': 6, docks: 6,
+  'rail-station': 6.5, 'open-pit': 6, 'agri-complex': 6, 'assembly-plant': 6, 'container-port': 6.5, 'electric-station': 6.5, 'sky-dock': 5, 'sky-harbour': 6, maglev: 6.5,
 };
 export function footprint(model: string): number {
   return FOOTPRINT[model] ?? 4.2;

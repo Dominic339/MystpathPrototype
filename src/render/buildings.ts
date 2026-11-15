@@ -3,14 +3,16 @@
 // (roof material, wall finish, cloth colour) and every building its own variant (size, door,
 // porch, clutter), so no two towns, and no two huts, look quite alike.
 //
-// Hunter-gatherer and Stone age models are built here in full; later ages fall back to a
-// generic model by kind until their own models are made.
+// Hunter-gatherer and Stone age models are built here; the later ages' architecture (timber,
+// half-timber and stone, brick, iron and glass, concrete, white stone and crystal) is in
+// architecture.ts, built from this kit and its own.
 
 import * as THREE from 'three';
 import { hash01 } from '../sim/rng';
 import { color, jitter, limb, merge, mix, noise3, part } from './geom';
 import { tentGeometry } from './camp';
 import { rockShape } from './materials';
+import { LATER_MODELS } from './architecture';
 
 const V = (x: number, y: number, z: number) => new THREE.Vector3(x, y, z);
 type G = THREE.BufferGeometry;
@@ -56,7 +58,7 @@ const HIDE = color('#b08a62');
 const LOG = color('#6a4e34');
 const LOG_END = color('#c2a070');
 
-function wallColor(s: TownStyle) {
+export function wallColor(s: TownStyle) {
   return (p: THREE.Vector3) => {
     let c: C;
     if (s.wallKind === 'wattle') {
@@ -77,7 +79,7 @@ function wallColor(s: TownStyle) {
   };
 }
 
-function roofColor(s: TownStyle) {
+export function roofColor(s: TownStyle) {
   return (p: THREE.Vector3) => {
     const n = noise3(p.x * 3, p.y * 3, p.z * 3) * 0.5 + 0.5;
     let c: C;
@@ -104,12 +106,12 @@ const LASHING = color('#3a2a1a');
 const poleColor = (p: THREE.Vector3) => mix(POLE_DARK, POLE, noise3(p.x * 4, p.y * 2, p.z * 4) * 0.5 + 0.6);
 
 /** A pole with a little taper, in the tents' wood. */
-function pole(a: THREE.Vector3, b: THREE.Vector3, r = 0.06): G {
+export function pole(a: THREE.Vector3, b: THREE.Vector3, r = 0.06): G {
   return part(limb(a, b, r, r * 0.7, 5), poleColor);
 }
 
 /** A ring of lashing around a pole or bundle. */
-function lashing(at: THREE.Vector3, r: number, axis: 'x' | 'y' | 'z' = 'y'): G {
+export function lashing(at: THREE.Vector3, r: number, axis: 'x' | 'y' | 'z' = 'y'): G {
   const g = new THREE.TorusGeometry(r, 0.025, 4, 10);
   if (axis === 'y') g.rotateX(Math.PI / 2);
   if (axis === 'x') g.rotateY(Math.PI / 2);
@@ -122,7 +124,7 @@ function lashing(at: THREE.Vector3, r: number, axis: 'x' | 'y' | 'z' = 'y'): G {
  * them (daubed with clay, or left bare, or logs), a footing of stones, a painted band to
  * match the tents, and a doorway facing +z with a hide flap tied back.
  */
-function roundWall(r: number, h: number, s: TownStyle, seed: number, door = 0.62): G[] {
+export function roundWall(r: number, h: number, s: TownStyle, seed: number, door = 0.62): G[] {
   const half = door / 2;
   // Cylinder angles start at +z, so the gap left between the end and the start faces +z.
   const g = new THREE.CylinderGeometry(r, r * 1.03, h, 28, 4, true, half, Math.PI * 2 - door);
@@ -182,7 +184,7 @@ function roundWall(r: number, h: number, s: TownStyle, seed: number, door = 0.62
  * A thatched (or reed, turf or bark) cone laid in overlapping courses with ragged edges,
  * rafter ends showing under the eaves and, like the tents, poles crossing above the smoke hole.
  */
-function coneRoof(r: number, h: number, base: number, s: TownStyle, seed: number): G[] {
+export function coneRoof(r: number, h: number, base: number, s: TownStyle, seed: number): G[] {
   const parts: G[] = [];
   const courses = s.roofKind === 'turf' || s.roofKind === 'bark' ? 2 : 3;
   const col = roofColor(s);
@@ -236,7 +238,7 @@ function coneRoof(r: number, h: number, base: number, s: TownStyle, seed: number
 }
 
 /** A pitched roof along x (ridge along x), eaves at height `base`, laid in courses. */
-function gableRoof(w: number, d: number, rise: number, base: number, s: TownStyle): G[] {
+export function gableRoof(w: number, d: number, rise: number, base: number, s: TownStyle): G[] {
   const parts: G[] = [];
   const slope = Math.hypot(d / 2, rise);
   const ang = Math.atan2(rise, d / 2);
@@ -274,7 +276,7 @@ function gableRoof(w: number, d: number, rise: number, base: number, s: TownStyl
 }
 
 /** Gable end walls (triangles) for a closed building. */
-function gableEnds(w: number, d: number, rise: number, base: number, s: TownStyle): G[] {
+export function gableEnds(w: number, d: number, rise: number, base: number, s: TownStyle): G[] {
   const parts: G[] = [];
   for (const sgn of [-1, 1]) {
     const g = new THREE.BufferGeometry();
@@ -288,7 +290,7 @@ function gableEnds(w: number, d: number, rise: number, base: number, s: TownStyl
 }
 
 /** Rectangular walls with a door in the +z side. */
-function boxWalls(w: number, d: number, h: number, s: TownStyle, doorW = 1): G[] {
+export function boxWalls(w: number, d: number, h: number, s: TownStyle, doorW = 1): G[] {
   const parts: G[] = [];
   const t = 0.18;
   const wall = (gw: number, gd: number, x: number, z: number) => {
@@ -330,7 +332,7 @@ function boxWalls(w: number, d: number, h: number, s: TownStyle, doorW = 1): G[]
 }
 
 /** Forked posts holding up a roof, for open sheds, lashed at the fork. */
-function posts(w: number, d: number, h: number, s: TownStyle): G[] {
+export function posts(w: number, d: number, h: number, s: TownStyle): G[] {
   const parts: G[] = [];
   void s;
   for (const [x, z] of [[-w / 2, -d / 2], [w / 2, -d / 2], [-w / 2, d / 2], [w / 2, d / 2]]) {
@@ -344,21 +346,24 @@ function posts(w: number, d: number, h: number, s: TownStyle): G[] {
 }
 
 /** A woven basket. */
-function basket(x: number, z: number, s: TownStyle, r = 0.28): G {
+export function basket(x: number, z: number, s: TownStyle, r = 0.28): G {
   const g = new THREE.CylinderGeometry(r, r * 0.8, r * 1.3, 12, 3, true);
   g.translate(x, r * 0.65, z);
   return part(g, (p) => mix(s.roofDark, s.roof, Math.abs(Math.sin(p.y * 30 + Math.atan2(p.z - z, p.x - x) * 4)) * 0.6));
 }
 
-function logPile(n: number, len: number, x: number, z: number, rot = 0): G[] {
+export function logPile(n: number, len: number, x: number, z: number, rot = 0): G[] {
   const parts: G[] = [];
   let k = 0;
-  for (let row = 0; k < n; row++)
-    for (let i = 0; i < 4 - row && k < n; i++, k++) {
+  // A pyramid wide enough at the bottom to hold them all.
+  let base = 4;
+  while ((base * (base + 1)) / 2 < n) base++;
+  for (let row = 0; k < n && row < base; row++)
+    for (let i = 0; i < base - row && k < n; i++, k++) {
       const r = 0.15;
       const g = new THREE.CylinderGeometry(r, r, len, 8);
       g.rotateZ(Math.PI / 2);
-      g.translate(0, r + row * r * 1.7, (i - (3 - row) / 2) * r * 2.05);
+      g.translate(0, r + row * r * 1.7, (i - (base - 1 - row) / 2) * r * 2.05);
       g.rotateY(rot);
       g.translate(x, 0, z);
       parts.push(part(g, (p, nrm) => (Math.abs(nrm.x * Math.cos(rot) - nrm.z * Math.sin(rot)) > 0.9 ? LOG_END : jitter(LOG, 0.1, p.x * 5, p.y * 5, p.z * 5))));
@@ -366,7 +371,7 @@ function logPile(n: number, len: number, x: number, z: number, rot = 0): G[] {
   return parts;
 }
 
-function blockPile(n: number, x: number, z: number, s: TownStyle, seed: number): G[] {
+export function blockPile(n: number, x: number, z: number, s: TownStyle, seed: number): G[] {
   const parts: G[] = [];
   for (let k = 0; k < n; k++) {
     const g = new THREE.BoxGeometry(0.6, 0.38, 0.4);
@@ -379,7 +384,7 @@ function blockPile(n: number, x: number, z: number, s: TownStyle, seed: number):
   return parts;
 }
 
-function pots(n: number, x: number, z: number, seed: number): G[] {
+export function pots(n: number, x: number, z: number, seed: number): G[] {
   const parts: G[] = [];
   for (let k = 0; k < n; k++) {
     const g = new THREE.LatheGeometry([new THREE.Vector2(0.01, 0), new THREE.Vector2(0.16, 0.04), new THREE.Vector2(0.2, 0.18), new THREE.Vector2(0.14, 0.34), new THREE.Vector2(0.12, 0.4)], 9);
@@ -390,7 +395,7 @@ function pots(n: number, x: number, z: number, seed: number): G[] {
   return parts;
 }
 
-function reedBundles(n: number, x: number, z: number, s: TownStyle): G[] {
+export function reedBundles(n: number, x: number, z: number, s: TownStyle): G[] {
   const parts: G[] = [];
   for (let k = 0; k < n; k++) {
     const g = new THREE.CylinderGeometry(0.16, 0.2, 1.6, 7);
@@ -402,7 +407,7 @@ function reedBundles(n: number, x: number, z: number, s: TownStyle): G[] {
 }
 
 /** A frame with a stretched hide (or cloth). */
-function frame(x: number, z: number, rot: number, s: TownStyle, fill: C): G[] {
+export function frame(x: number, z: number, rot: number, s: TownStyle, fill: C): G[] {
   const parts: G[] = [];
   const w = 1.3;
   const h = 1.6;
@@ -420,7 +425,7 @@ function frame(x: number, z: number, rot: number, s: TownStyle, fill: C): G[] {
 }
 
 /** A ring of posts with wattle hurdles between them, with a gap for a gate. */
-function fenceRing(r: number, n: number, s: TownStyle, gate = 0.5, hurdles = true): G[] {
+export function fenceRing(r: number, n: number, s: TownStyle, gate = 0.5, hurdles = true): G[] {
   const parts: G[] = [];
   for (let k = 0; k < n; k++) {
     const a0 = (k / n) * Math.PI * 2 + gate / 2;
@@ -446,7 +451,7 @@ function fenceRing(r: number, n: number, s: TownStyle, gate = 0.5, hurdles = tru
 }
 
 /** A shallow pit: dark hollow with a raised rim. */
-function pit(r: number, x: number, z: number, inside: C, rim: C): G[] {
+export function pit(r: number, x: number, z: number, inside: C, rim: C): G[] {
   const parts: G[] = [];
   const floor = new THREE.CircleGeometry(r, 16);
   floor.rotateX(-Math.PI / 2);
@@ -461,7 +466,7 @@ function pit(r: number, x: number, z: number, inside: C, rim: C): G[] {
 }
 
 /** Rows of tilled soil with a crop. */
-function plots(w: number, d: number, rows: number, crop: C, flower: C | null, seed: number): G[] {
+export function plots(w: number, d: number, rows: number, crop: C, flower: C | null, seed: number): G[] {
   const parts: G[] = [];
   for (let r = 0; r < rows; r++) {
     const z = -d / 2 + (r + 0.5) * (d / rows);
@@ -482,7 +487,7 @@ function plots(w: number, d: number, rows: number, crop: C, flower: C | null, se
   return parts;
 }
 
-function smokeRack(x: number, z: number, s: TownStyle): G[] {
+export function smokeRack(x: number, z: number, s: TownStyle): G[] {
   const parts: G[] = [];
   for (const sx of [-0.8, 0.8]) parts.push(part(limb(V(x + sx, -0.1, z), V(x + sx, 1.5, z), 0.05, 0.04, 4), s.wood));
   parts.push(part(limb(V(x - 0.9, 1.45, z), V(x + 0.9, 1.45, z), 0.04, 0.04, 4), s.wood));
@@ -495,7 +500,7 @@ function smokeRack(x: number, z: number, s: TownStyle): G[] {
   return parts;
 }
 
-function canoe(len: number, x: number, z: number, rot: number, carved = 1): G {
+export function canoe(len: number, x: number, z: number, rot: number, carved = 1): G {
   const g = new THREE.CylinderGeometry(0.32, 0.32, len, 12, 6, false, 0, Math.PI);
   g.rotateZ(Math.PI / 2);
   g.rotateX(Math.PI);
@@ -513,7 +518,7 @@ function canoe(len: number, x: number, z: number, rot: number, carved = 1): G {
   return part(g, (p, n) => (n.y > 0.5 ? color('#3a2a1c') : jitter(color('#6a4e34'), 0.08, p.x * 4, p.y * 4, p.z * 4)));
 }
 
-function pennant(x: number, z: number, h: number, s: TownStyle): G[] {
+export function pennant(x: number, z: number, h: number, s: TownStyle): G[] {
   const flag = new THREE.PlaneGeometry(0.7, 0.4);
   flag.translate(0.35, h - 0.3, 0);
   flag.translate(x, 0, z);
@@ -522,9 +527,9 @@ function pennant(x: number, z: number, h: number, s: TownStyle): G[] {
 
 // ------------------------------------------------------------------ hunter-gatherer and stone age models
 
-type Model = (s: TownStyle, v: number) => G;
+export type Model = (s: TownStyle, v: number) => G;
 
-function hut(s: TownStyle, r: number, wallH: number, roofH: number, seed: number, porch = false): G[] {
+export function hut(s: TownStyle, r: number, wallH: number, roofH: number, seed: number, porch = false): G[] {
   const parts = [...roundWall(r, wallH, s, seed), ...coneRoof(r * 1.22, roofH, wallH - 0.08, s, seed)];
   if (porch) {
     // A small porch roof over the door.
@@ -891,7 +896,7 @@ export function buildingGeometry(model: string, kind: string, style: TownStyle, 
   const key = `${style.name}|${model}|${variant}`;
   let g = cache.get(key);
   if (!g) {
-    const fn = MODELS[model];
+    const fn = MODELS[model] ?? LATER_MODELS[model];
     g = fn ? fn(style, variant) : fallback(kind, model, style, variant);
     g.computeBoundingBox();
     cache.set(key, g);
@@ -900,7 +905,7 @@ export function buildingGeometry(model: string, kind: string, style: TownStyle, 
 }
 
 export function hasModel(model: string): boolean {
-  return MODELS[model] !== undefined;
+  return MODELS[model] !== undefined || LATER_MODELS[model] !== undefined;
 }
 
 /** Stakes and scaffold poles around a building site. */
