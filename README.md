@@ -14,7 +14,9 @@ Restarted from scratch on a web stack (the old Unity prototype was removed).
   separate from rendering, deterministic seeds, save/load, tests, headless screenshots.
 - **Milestone 2 — Visual test scene:** done, awaiting art review. A hand-shaped valley
   with a river, lake, rocky outcrop, forest, a hunter-gatherer camp and an airship,
-  with a full day-night cycle.
+  with a full day-night cycle. Water is simulated: a wave simulation carries ripples,
+  splashes and wakes, the river current flows toward the lake, and a canoe floats, drifts
+  and leaves a wake.
 - Next: milestone 3, procedural world generation.
 
 ## Running it
@@ -40,6 +42,11 @@ npm run screenshot # renders ./screenshots (after a build; needs Chrome)
 | T | Skip ahead 1/8 of a day |
 | H | Toggle the hex grid |
 | P | Download a save file |
+| Double-click water | Splash into the wave simulation |
+| Toolbar | Speed, skip time, hex grid, follow the airship / canoe / camp |
+
+Touch (testing only — the game targets PC): drag pans, pinch zooms, twist rotates,
+two fingers up/down tilt, double-tap water to splash. Phones get a lighter graphics mode.
 
 URL parameters for testing: `seed`, `t` (game seconds; 0 sunrise, 300 noon, 600 sunset,
 900 midnight), `speed`, `warm`, `cam=x,z,yaw,pitch,distance`, `hex=1`, `q=low`, `ui=0`.

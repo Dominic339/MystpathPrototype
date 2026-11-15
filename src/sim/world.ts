@@ -4,7 +4,7 @@
 import { Rng, subSeed } from './rng';
 import { Heightfield } from './terrain';
 import { GameClock } from './time';
-import { buildTestScene } from './testScene';
+import { buildTestScene, type FlowField } from './testScene';
 
 export type PropKind = 'oak' | 'pine' | 'birch' | 'bush' | 'rock' | 'boulder' | 'reeds' | 'flowers';
 
@@ -58,6 +58,7 @@ export interface World {
   terrain: Heightfield;
   props: PropInstance[];
   camp: CampLayout;
+  flow: FlowField;
   villagers: Villager[];
   rng: Rng;
 }
@@ -89,7 +90,7 @@ export function createWorld(seed: number): World {
       next: 'resting',
     });
   }
-  return { seed, clock: new GameClock(), terrain: scene.terrain, props: scene.props, camp: scene.camp, villagers, rng };
+  return { seed, clock: new GameClock(), terrain: scene.terrain, props: scene.props, camp: scene.camp, flow: scene.flow, villagers, rng };
 }
 
 function makeName(rng: Rng): string {

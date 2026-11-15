@@ -11,7 +11,7 @@ import type { CampLayout, PropInstance, PropKind } from './world';
 export const TEST_SCENE_SIZE = 320;
 export const TEST_SCENE_RES = 257;
 
-const RIVER: readonly [number, number][] = [
+export const RIVER: readonly [number, number][] = [
   [-175, -105],
   [-120, -62],
   [-70, -30],
@@ -20,7 +20,7 @@ const RIVER: readonly [number, number][] = [
   [42, 44],
   [62, 58],
 ];
-const LAKE = { x: 88, z: 78, r: 52 };
+export const LAKE = { x: 88, z: 78, r: 52 };
 const OUTCROP = { x: 92, z: -88 };
 export const CAMP_CENTER = { x: -42, z: 26 };
 
@@ -28,6 +28,15 @@ export interface TestScene {
   terrain: Heightfield;
   props: PropInstance[];
   camp: CampLayout;
+  flow: FlowField;
+}
+
+/** Surface current of the water, in metres per second, on a regular grid. */
+export interface FlowField {
+  res: number;
+  size: number;
+  /** Interleaved x, z velocity per cell, row-major (z rows). */
+  data: Float32Array;
 }
 
 export function buildTestScene(seed: number): TestScene {
@@ -48,7 +57,7 @@ export function buildTestScene(seed: number): TestScene {
 
   const camp = layoutCamp(terrain);
   const props = scatterProps(seed, terrain, n);
-  return { terrain, props, camp };
+  return { terrain, props, camp, flow: buildFlow(terrain) };
 }
 
 function baseHeight(x: number, z: number, n: Noise2D, detail: Noise2D): number {
@@ -198,4 +207,54 @@ function scatterProps(seed: number, terrain: Heightfield, n: Noise2D): PropInsta
   add('oak', CAMP_CENTER.x - 24, CAMP_CENTER.z + 14, 1.15);
   add('birch', CAMP_CENTER.x - 18, CAMP_CENTER.z - 17, 1.0);
   return props;
+}
+
+/**
+ * River current: flows along the channel toward the lake, fastest mid-stream and in
+ * the narrow upper reaches, slowing to almost nothing in the lake.
+ */
+function buildFlow(terrain: Heightfield): FlowField {
+  const res = 128;
+  const data = new Float32Array(res * res * 2);
+  const size = terrain.size;
+  for (let j = 0; j < res; j++)
+    for (let i = 0; i < res; i++) {
+      const x = (i / (res - 1) - 0.5) * size;
+      const z = (j / (res - 1) - 0.5) * size;
+      const k = (j * res + i) * 2;
+      if (terrain.sample(x, z) >= terrain.waterLevel) continue;
+      const seg = nearestSegment(x, z);
+      const width = 4.5 + seg.t * 5;
+      const midstream = 1 - smoothstep(0, width + 6, seg.d);
+      const lakeD = Math.hypot(x - LAKE.x, z - LAKE.z);
+      const intoLake = smoothstep(LAKE.r * 0.2, LAKE.r * 1.1, lakeD);
+      const speed = (1.6 - seg.t * 0.7) * midstream * intoLake;
+      data[k] = seg.tx * speed;
+      data[k + 1] = seg.tz * speed;
+    }
+  return { res, size, data };
+}
+
+function nearestSegment(x: number, z: number): { d: number; t: number; tx: number; tz: number } {
+  let best = { d: Infinity, t: 0, tx: 1, tz: 0 };
+  let total = 0;
+  const lengths: number[] = [];
+  for (let k = 0; k < RIVER.length - 1; k++) {
+    const l = Math.hypot(RIVER[k + 1][0] - RIVER[k][0], RIVER[k + 1][1] - RIVER[k][1]);
+    lengths.push(l);
+    total += l;
+  }
+  let acc = 0;
+  for (let k = 0; k < RIVER.length - 1; k++) {
+    const [ax, az] = RIVER[k];
+    const [bx, bz] = RIVER[k + 1];
+    const dx = bx - ax;
+    const dz = bz - az;
+    const len = lengths[k];
+    const u = Math.max(0, Math.min(1, ((x - ax) * dx + (z - az) * dz) / (len * len)));
+    const d = Math.hypot(x - (ax + dx * u), z - (az + dz * u));
+    if (d < best.d) best = { d, t: (acc + len * u) / total, tx: dx / len, tz: dz / len };
+    acc += len;
+  }
+  return best;
 }

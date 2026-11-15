@@ -17,6 +17,10 @@ const defaults = {
   'camp-close': 't=230&speed=0&warm=40&ui=0&cam=-42,26,0.35,0.42,26',
   'golden-hour': 't=560&speed=0&warm=90&ui=0&cam=-60,-120,0.53,0.18,190',
   night: 't=820&speed=0&warm=90&ui=0&cam=-42,26,0.9,0.5,45',
+  canoe: 't=260&warm=40&ui=0&follow=canoe',
+  airship: 't=300&ui=0&follow=airship',
+  villagers: 't=230&speed=0&warm=0&ui=0&cam=-42,26,0.35,0.22,7',
+  'mobile-ui': 't=240&warm=40',
   'hex-grid': 't=300&speed=0&ui=0&hex=1&cam=-30,20,0.75,0.9,110',
 };
 
@@ -35,7 +39,9 @@ const browser = await puppeteer.launch({
 try {
   for (const [name, query] of Object.entries(shots)) {
     const page = await browser.newPage();
-    await page.setViewport({ width: W, height: H });
+    // Names starting with "mobile" render as a phone (touch, small portrait screen).
+    if (name.startsWith('mobile')) await page.setViewport({ width: 390, height: 844, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
+    else await page.setViewport({ width: W, height: H });
     const errors = [];
     page.on('pageerror', (e) => errors.push(String(e)));
     page.on('console', (m) => m.type() === 'error' && errors.push(m.text()));

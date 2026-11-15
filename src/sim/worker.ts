@@ -3,6 +3,7 @@
 import { ACTIVITY_CODES, VILLAGER_STRIDE, type FromSim, type ToSim } from './protocol';
 import { saveWorld } from './save';
 import { createWorld, tick, type World } from './world';
+import { LAKE, RIVER } from './testScene';
 
 const TICK_HZ = 10;
 const MAX_STEP = 0.5; // game seconds per sub-step, keeps fast-forward stable
@@ -29,6 +30,8 @@ self.onmessage = (e: MessageEvent<ToSim>) => {
         terrain: { res: t.res, size: t.size, waterLevel: t.waterLevel, heights: t.heights.slice() },
         props: world.props,
         camp: world.camp,
+        flow: { res: world.flow.res, size: world.flow.size, data: world.flow.data.slice() },
+        waterway: { river: RIVER.map(([x, z]) => [x, z] as [number, number]), lake: LAKE },
         villagers: world.villagers.map((v) => ({ id: v.id, name: v.name, passion: v.passion, look: v.look })),
       });
       last = performance.now();

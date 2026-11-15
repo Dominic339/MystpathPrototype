@@ -4,6 +4,7 @@ import { Rng } from './rng';
 import { Heightfield } from './terrain';
 import { GameClock } from './time';
 import type { World } from './world';
+import { buildTestScene } from './testScene';
 
 export const SAVE_VERSION = 1;
 
@@ -48,6 +49,8 @@ export function loadWorld(save: SaveFile): World {
     terrain: new Heightfield(t.res, t.size, decodeFloats(t.heights), t.waterLevel),
     props: save.props,
     camp: save.camp,
+    // The current is derived from the scene layout, so it is rebuilt rather than saved.
+    flow: buildTestScene(save.seed).flow,
     villagers: save.villagers.map((v) => ({ ...v })),
   };
 }

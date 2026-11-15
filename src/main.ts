@@ -18,9 +18,10 @@ import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { Heightfield } from './sim/terrain';
 import { calendar, CYCLE_SECONDS, DAY_SECONDS } from './sim/time';
-import type { FromSim, ToSim } from './sim/protocol';
+import { VILLAGER_STRIDE, type FromSim, type ToSim } from './sim/protocol';
 import { buildTerrain } from './render/terrainMesh';
-import { buildWater } from './render/water';
+import { WaterSystem } from './render/water';
+import { buildBoat, type BoatView } from './render/boat';
 import { buildSky, skyState } from './render/sky';
 import { buildVegetation } from './render/vegetation';
 import { buildGrass } from './render/grass';
@@ -36,13 +37,15 @@ const num = (k: string, d: number) => (params.has(k) ? Number(params.get(k)) : d
 const seed = num('seed', 20261114);
 const startSeconds = num('t', DAY_SECONDS * 0.32);
 const startSpeed = num('speed', 1);
-const lowQuality = params.get('q') === 'low';
+// Phones and tablets get lighter graphics (testing support only; the game targets PC).
+const touchDevice = window.matchMedia('(pointer: coarse)').matches;
+const lowQuality = params.get('q') === 'low' || touchDevice;
 const showUi = params.get('ui') !== '0';
 
 // ---------- renderer ----------
 const app = document.getElementById('app')!;
 const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance', preserveDrawingBuffer: true });
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, lowQuality ? 1.5 : 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -63,7 +66,7 @@ scene.fog = new THREE.FogExp2('#b9d5ec', 0.0013);
 
 const sun = new THREE.DirectionalLight('#ffffff', 3);
 sun.castShadow = true;
-sun.shadow.mapSize.set(4096, 4096);
+sun.shadow.mapSize.setScalar(lowQuality ? 2048 : 4096);
 sun.shadow.camera.near = 1;
 sun.shadow.camera.far = 600;
 const SH = 110;
@@ -113,7 +116,8 @@ const worker = new Worker(new URL('./sim/worker.ts', import.meta.url), { type: '
 const send = (msg: ToSim) => worker.postMessage(msg);
 
 let terrain: Heightfield | null = null;
-let water: ReturnType<typeof buildWater> | null = null;
+let water: WaterSystem | null = null;
+let boat: BoatView | null = null;
 let camp: CampBuild | null = null;
 let villagers: VillagerView | null = null;
 let hexOverlay: THREE.LineSegments | null = null;
@@ -132,9 +136,16 @@ worker.onmessage = (e: MessageEvent<FromSim>) => {
     terrain = new Heightfield(t.res, t.size, t.heights, t.waterLevel);
     const built = buildTerrain(terrain, msg.camp, msg.props);
     scene.add(built.mesh);
-    scene.add(buildGrass(terrain, built.mesh, built.grassWeight));
-    water = buildWater(terrain);
+    scene.add(buildGrass(terrain, built.mesh, built.grassWeight, lowQuality ? 18000 : 48000));
+    water = new WaterSystem(terrain, msg.flow);
     scene.add(water.mesh);
+    // Boat route: down the river (starting inside the map), then a loop of the lake.
+    const half = terrain.size / 2 - 12;
+    const river = msg.waterway.river.filter(([x, z]) => Math.abs(x) < half && Math.abs(z) < half);
+    const lk = msg.waterway.lake;
+    const lakeLoop: [number, number][] = [0, 1, 2, 3, 4, 5].map((k) => [lk.x + Math.cos(-2.3 + k * 1.05) * lk.r * 0.45, lk.z + Math.sin(-2.3 + k * 1.05) * lk.r * 0.45]);
+    boat = buildBoat(water, [...river, ...lakeLoop]);
+    scene.add(boat.group);
     scene.add(buildVegetation(msg.props, terrain));
     camp = buildCamp(msg.camp, terrain);
     scene.add(camp.group);
@@ -153,6 +164,13 @@ worker.onmessage = (e: MessageEvent<FromSim>) => {
     simSpeed = msg.speed;
     lastTickAt = performance.now();
     villagers?.setTargets(msg.villagers);
+    // Villagers fetching water stir the surface.
+    for (let k = 0; k < msg.villagers.length; k += VILLAGER_STRIDE) {
+      if (msg.villagers[k + 3] === 3 && Math.random() < 0.15) {
+        const h = msg.villagers[k + 2];
+        water?.disturb(msg.villagers[k] + Math.sin(h) * 1.2, msg.villagers[k + 1] + Math.cos(h) * 1.2, -0.05, 0.6);
+      }
+    }
   } else if (msg.type === 'saved') {
     const blob = new Blob([msg.json], { type: 'application/json' });
     const a = document.createElement('a');
@@ -172,6 +190,58 @@ window.addEventListener('keydown', (e) => {
   if (e.key.toLowerCase() === 't') send({ type: 'setTime', totalSeconds: simSeconds + CYCLE_SECONDS / 8 });
   if (e.key.toLowerCase() === 'p') send({ type: 'save' });
 });
+
+// Double-click (or double-tap) water to make a splash in the wave simulation.
+const raycaster = new THREE.Raycaster();
+function splashAt(clientX: number, clientY: number): void {
+  if (!water || !terrain) return;
+  const ndc = new THREE.Vector2((clientX / window.innerWidth) * 2 - 1, -(clientY / window.innerHeight) * 2 + 1);
+  raycaster.setFromCamera(ndc, camera);
+  const hit = new THREE.Vector3();
+  if (!raycaster.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 1, 0), -terrain.waterLevel), hit)) return;
+  if (water.depthAt(hit.x, hit.z) > 0.1) water.disturb(hit.x, hit.z, -0.45, 1.8);
+}
+renderer.domElement.addEventListener('dblclick', (e) => splashAt(e.clientX, e.clientY));
+let lastTap = 0;
+renderer.domElement.addEventListener('pointerup', (e) => {
+  if (e.pointerType !== 'touch') return;
+  const now = performance.now();
+  if (now - lastTap < 320) splashAt(e.clientX, e.clientY);
+  lastTap = now;
+});
+
+// Toolbar (also the way to reach these actions on a phone).
+const toolbar = document.getElementById('toolbar')!;
+toolbar.style.display = showUi ? 'flex' : 'none';
+function button(label: string, onClick: (b: HTMLButtonElement) => void): HTMLButtonElement {
+  const b = document.createElement('button');
+  b.textContent = label;
+  b.addEventListener('click', () => onClick(b));
+  toolbar.appendChild(b);
+  return b;
+}
+const speedButton = button('Speed 1×', () => {
+  const next = SPEEDS[(SPEEDS.indexOf(simSpeed) + 1) % SPEEDS.length];
+  send({ type: 'setSpeed', speed: next });
+});
+button('Skip time', () => send({ type: 'setTime', totalSeconds: simSeconds + CYCLE_SECONDS / 8 }));
+button('Hex grid', () => hexOverlay && (hexOverlay.visible = !hexOverlay.visible));
+const followButtons: HTMLButtonElement[] = [];
+const followTarget = (b: HTMLButtonElement, target: () => THREE.Vector3 | null, distance: number) => {
+  const active = b.classList.contains('on');
+  followButtons.forEach((x) => x.classList.remove('on'));
+  if (active) rig.setFollow(null);
+  else {
+    rig.setFollow(target, distance);
+    b.classList.add('on');
+  }
+};
+followButtons.push(button('Follow airship', (b) => followTarget(b, () => airship.group.position.clone(), 38)));
+followButtons.push(button('Follow canoe', (b) => followTarget(b, () => (boat ? boat.group.position.clone() : null), 16)));
+followButtons.push(button('Camp', (b) => followTarget(b, () => (villagers ? villagers.positionOf(0) : null), 22)));
+rig.onUserMove = () => followButtons.forEach((x) => x.classList.remove('on'));
+if (params.get('follow') === 'airship') followButtons[0].click();
+if (params.get('follow') === 'canoe') followButtons[1].click();
 
 // ---------- HUD ----------
 const hud = document.getElementById('hud')!;
@@ -209,6 +279,7 @@ function frame(): void {
   (scene.fog as THREE.FogExp2).color.copy(s.fogColor);
   renderer.toneMappingExposure = s.exposure;
   if (water) {
+    water.update(dt);
     const u = water.uniforms;
     u.uSunDir.value.copy(s.lightDir);
     u.uSunColor.value.copy(s.lightColor).multiplyScalar(Math.max(0.15, Math.min(1, s.lightIntensity / 2.5)));
@@ -222,9 +293,16 @@ function frame(): void {
   camp?.update(realTime, s.night);
   villagers?.update(dt, realTime);
   airship.update(gameSeconds, s.night);
+  boat?.update(dt, realTime);
 
   composer.render(dt);
-  if (showUi) hud.innerHTML = `${clockText(gameSeconds)}<br><span class="quiet">Speed ${simSpeed}× · 1–4 speed · Space pause · T skip time · H hex grid · WASD/QE/drag/wheel camera</span>`;
+  if (showUi) {
+    const help = touchDevice
+      ? 'Drag to pan · pinch to zoom · twist to rotate · two fingers up/down to tilt · double-tap water to splash'
+      : 'WASD/QE/drag/wheel camera · Shift+wheel tilt · 1–4 speed · T skip time · H hex grid · double-click water to splash';
+    hud.innerHTML = `${clockText(gameSeconds)}<br><span class="quiet">${help}</span>`;
+    speedButton.textContent = simSpeed === 0 ? 'Paused' : `Speed ${simSpeed}×`;
+  }
 
   if (framesSinceWorld >= 0 && ++framesSinceWorld === 8) (window as unknown as { __mystReady: boolean }).__mystReady = true;
   requestAnimationFrame(frame);

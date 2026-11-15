@@ -18,6 +18,9 @@ export type FromSim =
       terrain: { res: number; size: number; waterLevel: number; heights: Float32Array };
       props: PropInstance[];
       camp: CampLayout;
+      flow: { res: number; size: number; data: Float32Array };
+      /** Navigable route for boats: river centreline and the lake it feeds. */
+      waterway: { river: [number, number][]; lake: { x: number; z: number; r: number } };
       villagers: { id: number; name: string; passion: string; look: number }[];
     }
   | { type: 'tick'; totalSeconds: number; speed: number; villagers: Float32Array }

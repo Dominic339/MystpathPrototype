@@ -6,11 +6,11 @@ import type { PropInstance, PropKind } from '../sim/world';
 import type { Heightfield } from '../sim/terrain';
 import { hash01 } from '../sim/rng';
 import { color, jitter, limb, merge, mix, noise3, part } from './geom';
-import { blob, natureMaterial, rockShape } from './materials';
+import { natureMaterial, rockShape } from './materials';
+import { canopyMass, limbTube, rand, type BarkPalette, type Knot, type Lobe } from './trees';
 
 const V = (x: number, y: number, z: number) => new THREE.Vector3(x, y, z);
 
-const BARK = color('#5b4330');
 const BARK_DARK = color('#3b2a1d');
 const LEAF_DEEP = color('#1f3a1a');
 const LEAF = color('#3f6526');
@@ -19,17 +19,6 @@ const PINE_DEEP = color('#1d3b26');
 const PINE = color('#2f5634');
 const PINE_TIP = color('#5a7c3e');
 
-function canopyColor(base: THREE.Color, deep: THREE.Color, sun: THREE.Color, center: THREE.Vector3, r: number) {
-  return (p: THREE.Vector3, n: THREE.Vector3) => {
-    // Darker underneath and inside, warmer and lighter where the sun hits the top.
-    const up = n.y * 0.5 + 0.5;
-    const outward = Math.min(1, p.distanceTo(center) / r);
-    const c = mix(deep, base, up * 0.9 + outward * 0.3);
-    mix(c, sun, Math.max(0, n.y - 0.45) * 0.4 * outward, c);
-    return jitter(c, 0.14, p.x, p.y, p.z);
-  };
-}
-
 function barkColor(dark: THREE.Color, light: THREE.Color) {
   return (p: THREE.Vector3) => {
     const streak = noise3(p.x * 9, p.y * 1.6, p.z * 9) * 0.5 + 0.5;
@@ -37,62 +26,101 @@ function barkColor(dark: THREE.Color, light: THREE.Color) {
   };
 }
 
+const OAK_BARK: BarkPalette = { dark: color('#33251a'), light: color('#6e5440'), knot: color('#1e150f') };
+
+/**
+ * Broadleaf oak. Variants differ in form: a leaning single trunk that forks into the crown,
+ * or a twin trunk split from the base. Visible limbs run up into one solid canopy.
+ */
 function oak(seed: number): THREE.BufferGeometry {
   const parts: THREE.BufferGeometry[] = [];
-  const h = 4.2 + hash01(seed, 1) * 1.4;
-  parts.push(part(limb(V(0, -0.3, 0), V(0.25, h, 0.1), 0.42, 0.24, 8, 0.25), barkColor(BARK_DARK, BARK)));
-  // Main branches.
-  for (let b = 0; b < 4; b++) {
-    const a = (b / 4) * Math.PI * 2 + hash01(seed, 2, b) * 0.9;
-    const y0 = h * (0.55 + hash01(seed, 3, b) * 0.25);
-    const end = V(Math.cos(a) * 2.1, y0 + 1.6, Math.sin(a) * 2.1);
-    parts.push(part(limb(V(0.15, y0, 0.05), end, 0.17, 0.07, 6), barkColor(BARK_DARK, BARK)));
+  const twin = seed % 3 === 1;
+  const h = rand(seed, 1, 3.6, 4.6);
+  const leanA = rand(seed, 2, 0, Math.PI * 2);
+  const lean = rand(seed, 3, 0.25, 0.75);
+  const lx = Math.cos(leanA) * lean;
+  const lz = Math.sin(leanA) * lean;
+  const lobes: Lobe[] = [];
+  const knots = (n: number, s: number): Knot[] =>
+    Array.from({ length: n }, (_, k) => ({ t: rand(s, 10, 0.25, 0.8, k), angle: rand(s, 11, 0, 6.28, k), size: rand(s, 12, 0.07, 0.13, k) }));
+
+  const stems = twin ? 2 : 1;
+  for (let st = 0; st < stems; st++) {
+    const off = twin ? (st === 0 ? -1 : 1) : 0;
+    const sx = twin ? Math.cos(leanA + 1.6) * 0.35 * off : 0;
+    const sz = twin ? Math.sin(leanA + 1.6) * 0.35 * off : 0;
+    const spread = twin ? 0.9 * off : 0;
+    const top = V(sx + lx + Math.cos(leanA + 1.6) * spread, h * (twin ? 0.95 : 1), sz + lz + Math.sin(leanA + 1.6) * spread);
+    const trunkPts = [V(sx * 0.6, -0.35, sz * 0.6), V(sx * 0.8 + lx * 0.25, h * 0.35, sz * 0.8 + lz * 0.25), V(sx + lx * 0.7 + (top.x - lx) * 0.5, h * 0.7, sz + lz * 0.7 + (top.z - lz) * 0.5), top];
+    const r0 = twin ? 0.3 : 0.42;
+    parts.push(limbTube({ points: trunkPts, r0, r1: r0 * 0.6, flare: twin ? 0.5 : 0.8, knots: knots(3, seed + st * 17) }, OAK_BARK, 10, 16));
+
+    // Main limbs fork from the top of each trunk and reach into the crown.
+    const limbs = twin ? 3 : 4;
+    for (let b = 0; b < limbs; b++) {
+      const a = leanA + (b / limbs) * Math.PI * 2 + rand(seed, 20 + st, -0.5, 0.5, b);
+      const reach = rand(seed, 21 + st, 1.6, 2.6, b);
+      const rise = rand(seed, 22 + st, 1.8, 2.8, b);
+      const end = V(top.x + Math.cos(a) * reach, top.y + rise, top.z + Math.sin(a) * reach);
+      const mid = V(top.x + Math.cos(a) * reach * 0.45, top.y + rise * 0.35, top.z + Math.sin(a) * reach * 0.45);
+      parts.push(limbTube({ points: [top.clone().add(V(0, -0.3, 0)), mid, end], r0: r0 * 0.5, r1: 0.06, knots: b % 2 ? knots(1, seed + b) : [] }, OAK_BARK, 7, 9));
+      lobes.push({ center: end.clone().add(V(Math.cos(a) * 0.4, 0.7, Math.sin(a) * 0.4)), radius: rand(seed, 23 + st, 1.3, 1.8, b) });
+    }
+    // A low side branch below the crown.
+    if (!twin || st === 0) {
+      const a = leanA + Math.PI + rand(seed, 30, -0.6, 0.6);
+      const y = h * rand(seed, 31, 0.45, 0.6);
+      const base = V(sx + lx * 0.5, y, sz + lz * 0.5);
+      const end = V(base.x + Math.cos(a) * 2.4, y + 1.3, base.z + Math.sin(a) * 2.4);
+      parts.push(limbTube({ points: [base, V(base.x + Math.cos(a) * 1.2, y + 0.4, base.z + Math.sin(a) * 1.2), end], r0: 0.13, r1: 0.04 }, OAK_BARK, 6, 8));
+      lobes.push({ center: end.clone().add(V(0, 0.4, 0)), radius: 1.3 });
+    }
+    lobes.push({ center: top.clone().add(V(0, 2.7, 0)), radius: twin ? 1.7 : 2.1 });
   }
-  // Canopy: a dark inner mass plus many smaller clumps scattered over an irregular crown,
-  // so the silhouette breaks up instead of reading as a few big balls.
-  const crownY = h + 1.6;
-  const core = blob(2.5, 2, 0.25, 0.7, seed * 0.37);
-  core.scale(1.15, 0.8, 1.1);
-  core.translate(0.2, crownY, 0);
-  parts.push(part(core, canopyColor(LEAF_DEEP, LEAF_DEEP, LEAF, V(0, crownY, 0), 5)));
-  const clumps = 16 + Math.floor(hash01(seed, 4) * 6);
-  for (let k = 0; k < clumps; k++) {
-    // Points on a squashed, lopsided ellipsoid shell.
-    const u = hash01(seed, 5, k) * Math.PI * 2;
-    const v = Math.acos(1 - hash01(seed, 6, k) * 1.55); // favour the upper half
-    const shell = 2.6 + hash01(seed, 7, k) * 0.9;
-    const lopsided = 1 + 0.25 * Math.cos(u - seed);
-    const c = V(Math.sin(v) * Math.cos(u) * shell * 1.15 * lopsided, crownY + Math.cos(v) * shell * 0.72, Math.sin(v) * Math.sin(u) * shell * 1.1);
-    const r = 0.85 + hash01(seed, 8, k) * 0.65;
-    const g = blob(r, 2, 0.34, 1.4, seed + k * 7.3);
-    g.translate(c.x, c.y, c.z);
-    parts.push(part(g, canopyColor(LEAF, LEAF_DEEP, LEAF_SUN, V(0, crownY, 0), 3.6)));
-  }
+  parts.push(canopyMass(lobes, seed, { deep: LEAF_DEEP, base: LEAF, sun: LEAF_SUN }, 4));
   return merge(parts);
 }
 
+const BIRCH_BARK: BarkPalette = {
+  dark: color('#cfc8b8'),
+  light: color('#ece7da'),
+  knot: color('#2b2622'),
+  paint: (p, t, a) => {
+    const m = noise3(Math.cos(a) * 3.5, p.y * 6, Math.sin(a) * 3.5);
+    if (m > 0.36 || (t < 0.12 && m > 0.05)) return color('#2b2622');
+    return jitter(color('#e6e1d4'), 0.06, p.x, p.y, p.z);
+  },
+};
+
+/** Slender birch: thin pale trunk (sometimes a pair), gentle lean, tall narrow crown. */
 function birch(seed: number): THREE.BufferGeometry {
   const parts: THREE.BufferGeometry[] = [];
-  const h = 5.5 + hash01(seed, 1) * 1.5;
-  const white = color('#e6e1d4');
-  const mark = color('#2b2622');
-  parts.push(
-    part(limb(V(0, -0.3, 0), V(-0.2, h + 1.5, 0.15), 0.2, 0.09, 8, 0.18), (p) => {
-      const m = noise3(p.x * 14, p.y * 5.5, p.z * 14);
-      return m > 0.38 ? mark : jitter(white, 0.06, p.x, p.y, p.z);
-    }),
-  );
-  const leaf = color('#7fa23a');
-  const leafDeep = color('#46692a');
-  const leafSun = color('#c3c95a');
-  for (let k = 0; k < 6; k++) {
-    const a = k * 2.3 + hash01(seed, 2, k);
-    const ring = k === 0 ? 0 : 0.9 + hash01(seed, 3, k) * 0.6;
-    const g = blob(1.05 + hash01(seed, 4, k) * 0.4, 2, 0.3, 1.2, seed * 1.7 + k);
-    g.scale(1, 1.25, 1);
-    g.translate(Math.cos(a) * ring - 0.15, h + 0.4 + k * 0.38, Math.sin(a) * ring);
-    parts.push(part(g, canopyColor(leaf, leafDeep, leafSun, V(0, h + 1.5, 0), 2.6)));
+  const h = rand(seed, 1, 5.4, 6.8);
+  const pair = seed % 2 === 0;
+  const lobes: Lobe[] = [];
+  for (let st = 0; st < (pair ? 2 : 1); st++) {
+    const a = rand(seed, 2, 0, 6.28) + st * 2.6;
+    const lean = rand(seed, 3, 0.2, 0.6, st) + (pair ? 0.5 : 0);
+    const top = V(Math.cos(a) * lean, h - st * 0.8, Math.sin(a) * lean);
+    parts.push(
+      limbTube(
+        { points: [V(0, -0.3, 0), V(top.x * 0.3, h * 0.4, top.z * 0.3), V(top.x * 0.75, h * 0.75, top.z * 0.75), top], r0: 0.19, r1: 0.07, flare: 0.4, knots: [{ t: 0.5, angle: a, size: 0.06 }] },
+        BIRCH_BARK,
+        9,
+        14,
+      ),
+    );
+    for (let k = 0; k < 3; k++) {
+      const ba = a + k * 2.1;
+      const y = h * (0.62 + k * 0.1);
+      const base = V(top.x * (y / h), y, top.z * (y / h));
+      const end = V(base.x + Math.cos(ba) * 1.1, y + 1.0, base.z + Math.sin(ba) * 1.1);
+      parts.push(limbTube({ points: [base, end], r0: 0.05, r1: 0.02 }, BIRCH_BARK, 5, 4));
+      lobes.push({ center: end, radius: 1.1 });
+    }
+    lobes.push({ center: top.clone().add(V(0, 1.2, 0)), radius: 1.4 }, { center: top.clone().add(V(0, -0.2, 0)), radius: 1.2 });
   }
+  parts.push(canopyMass(lobes, seed + 3, { deep: color('#3d5d26'), base: color('#6f9437'), sun: color('#b8c25a') }, 4));
   return merge(parts);
 }
 
@@ -134,16 +162,15 @@ function pine(seed: number): THREE.BufferGeometry {
 
 function bush(seed: number): THREE.BufferGeometry {
   const parts: THREE.BufferGeometry[] = [];
-  const base = color('#456f2a');
-  const deep = color('#26421c');
-  const sun = color('#86a83d');
+  const lobes: Lobe[] = [];
   for (let k = 0; k < 4; k++) {
     const a = k * 1.9 + hash01(seed, 1, k);
-    const g = blob(0.55 + hash01(seed, 2, k) * 0.3, 2, 0.3, 1.6, seed + k);
-    g.scale(1, 0.8, 1);
-    g.translate(Math.cos(a) * 0.45, 0.45 + hash01(seed, 3, k) * 0.2, Math.sin(a) * 0.45);
-    parts.push(part(g, canopyColor(base, deep, sun, V(0, 0.5, 0), 1.1)));
+    lobes.push({ center: V(Math.cos(a) * 0.45, 0.42 + hash01(seed, 3, k) * 0.2, Math.sin(a) * 0.45), radius: 0.5 + hash01(seed, 2, k) * 0.25 });
   }
+  const g = canopyMass(lobes, seed, { deep: color('#22391a'), base: color('#456f2a'), sun: color('#86a83d') }, 3);
+  // Squash so the bush sits low and wide.
+  g.scale(1, 0.85, 1);
+  parts.push(g);
   // Occasional berries.
   if (hash01(seed, 9) > 0.4) {
     const berry = color('#9a1f2c');
@@ -253,8 +280,8 @@ export function buildVegetation(props: PropInstance[], terrain: Heightfield): TH
       sway: built.sway,
       flat: built.flat,
       side: kind === 'reeds' ? THREE.DoubleSide : THREE.FrontSide,
-      grain: leafy ? 0.38 : built.flat ? 0.18 : 0.12,
-      grainScale: leafy ? 3.2 : 1.6,
+      grain: leafy ? 0.5 : built.flat ? 0.18 : 0.12,
+      grainScale: leafy ? 4.2 : 1.6,
     });
     const mesh = new THREE.InstancedMesh(built.geo, mat, list.length);
     list.forEach((p, i) => {

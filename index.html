@@ -13,12 +13,24 @@
         font: 13px/1.4 system-ui, -apple-system, sans-serif; pointer-events: none; user-select: none;
       }
       #hud b { font-weight: 600; }
+      #toolbar {
+        position: fixed; left: 50%; bottom: calc(14px + env(safe-area-inset-bottom)); transform: translateX(-50%);
+        display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; max-width: calc(100vw - 20px);
+      }
+      #toolbar button {
+        font: 600 13px/1 system-ui, -apple-system, sans-serif; color: #e8ecf4; cursor: pointer;
+        background: rgba(10, 14, 22, 0.6); border: 1px solid rgba(255, 255, 255, 0.18); border-radius: 18px;
+        padding: 9px 13px; backdrop-filter: blur(6px); -webkit-tap-highlight-color: transparent;
+      }
+      #toolbar button.on { background: rgba(214, 168, 62, 0.85); color: #141413; border-color: transparent; }
+      @media (max-width: 600px) { #hud { font-size: 11px; max-width: calc(100vw - 48px); } #toolbar button { padding: 8px 10px; font-size: 12px; } }
       #hud .quiet { color: #a8b3c7; }
     </style>
   </head>
   <body>
     <div id="app"></div>
     <div id="hud"></div>
+    <div id="toolbar"></div>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>
