@@ -43,6 +43,7 @@ export const FACILITIES: readonly Facility[] = [
   f('pasture', 'Pasture', 'acquisition', 'stone', 'herder', 3, 2),
   f('apiary', 'Apiary', 'acquisition', 'iron', 'beekeeper', 1, 1),
   f('farm', 'Farm', 'acquisition', 'stone', 'farmer', 3, 4),
+  f('fibre-field', 'Fibre field', 'acquisition', 'stone', 'farmer', 2, 2),
   f('chicken-coop', 'Chicken coop', 'acquisition', 'stone', 'herder', 1, 1),
   f('pigsty', 'Pigsty', 'acquisition', 'stone', 'herder', 1, 1),
   f('cattle-pasture', 'Cattle pasture', 'acquisition', 'iron', 'herder', 3, 2),
@@ -91,6 +92,12 @@ export const FACILITIES: readonly Facility[] = [
   f('bone-carver', 'Bone carver', 'processing', 'hunter-gatherer', 'knapper', 1, 1),
   f('crystal-attuner', 'Crystal attuner', 'processing', 'medieval', 'arcanist', 1, 2),
   f('levitation-workshop', 'Levitation workshop', 'processing', 'renaissance', 'arcanist', 1, 3),
+  f('canoe-yard', "Canoe-builder's yard", 'processing', 'stone', 'carpenter', 1, 2),
+  f('boatwright', 'Boatwright', 'processing', 'iron', 'carpenter', 1, 3),
+  f('shipyard', 'Shipyard', 'processing', 'medieval', 'carpenter', 2, 6),
+  f('steel-shipyard', 'Steel shipyard', 'processing', 'industrial', 'smith', 3, 12),
+  f('airship-yard', 'Airship yard', 'processing', 'renaissance', 'carpenter', 2, 6),
+  f('airship-works', 'Airship works', 'processing', 'industrial', 'smith', 3, 10),
   f('enrichment-plant', 'Enrichment plant', 'processing', 'modern', 'chemist', 3, 10),
 ];
 

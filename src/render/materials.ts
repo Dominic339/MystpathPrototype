@@ -15,7 +15,7 @@ export const globalUniforms = {
 };
 
 function blankTexture(): THREE.DataTexture {
-  const t = new THREE.DataTexture(new Uint8Array([0]), 1, 1, THREE.RedFormat);
+  const t = new THREE.DataTexture(new Uint8Array([0, 0]), 1, 1, THREE.RGFormat);
   t.needsUpdate = true;
   return t;
 }

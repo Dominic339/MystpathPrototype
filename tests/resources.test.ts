@@ -10,6 +10,7 @@ import { DISCOVERIES, DISCOVERY_BY_ID } from '../src/sim/data/discoveries';
 import { FLORA, FLORA_BY_ID } from '../src/sim/data/flora';
 import { FAUNA, FAUNA_BY_ID } from '../src/sim/data/fauna';
 import { FOODS, STORAGES } from '../src/sim/data/preservation';
+import { LINES, ROAD_TIERS } from '../src/sim/data/structures';
 
 const isItem = (id: string) => MATERIAL_BY_ID.has(id) || PRODUCTS[id] !== undefined;
 
@@ -106,7 +107,6 @@ describe('references', () => {
     for (const d of DISCOVERIES) {
       for (const w of d.inspiredBy) expect(work.has(w), `${d.id}: ${w}`).toBe(true);
       for (const s of d.needsSeen ?? []) expect(isItem(s) || FAUNA_BY_ID.has(s) || FLORA_BY_ID.has(s), `${d.id}: ${s}`).toBe(true);
-      for (const id of Object.keys(d.build?.inputs ?? {})) expect(isItem(id), `${d.id}: ${id}`).toBe(true);
     }
     for (const a of ACQUISITION) {
       for (const r of a.requires) expect(DISCOVERY_BY_ID.has(r), `${a.id}: ${r}`).toBe(true);
@@ -126,11 +126,32 @@ describe('references', () => {
     // Every edible base material has spoilage data.
     for (const m of MATERIALS) if (m.perishable && ['plant', 'animal'].includes(m.layer) && !['hides', 'animal-fat', 'herbs'].includes(m.id)) expect(FOODS[m.id], m.id).toBeDefined();
     for (const r of RECIPES) for (const d of r.requires ?? []) expect(DISCOVERY_BY_ID.has(d), `${r.id}: ${d}`).toBe(true);
-    // Every storage is built from a discovery of the same id, with parallel cold paths.
-    for (const s of STORAGES) expect(DISCOVERY_BY_ID.get(s.id)?.build, s.id).toBeDefined();
+    // Every storage is provided by a structure tier, with parallel cold paths.
+    for (const s of STORAGES) expect(LINES.some((l) => l.tiers.some((t) => t.storage === s.id)), s.id).toBe(true);
     for (const id of ['ice-house', 'frost-box', 'refrigerator']) expect(STORAGES.some((s) => s.id === id), id).toBe(true);
     // Preserved foods keep far longer than raw.
     expect(FOODS['dried-meat'].shelfDays).toBeGreaterThan(FOODS['game-meat'].shelfDays * 20);
+  });
+
+  it('structure lines grow through the ages and cover every facility', () => {
+    const provided = new Set(LINES.flatMap((l) => l.tiers.flatMap((t) => t.facilities)));
+    // The camp's own spots (fire, knapping, drying rack, bone carving) need no building.
+    const camp = new Set(['campfire', 'knapping-spot', 'drying-rack', 'bone-carver']);
+    for (const f of FACILITIES) if (!camp.has(f.id)) expect(provided.has(f.id), f.id).toBe(true);
+    for (const l of LINES) {
+      expect(JOBS).toContain(l.job);
+      l.tiers.forEach((t, i) => {
+        for (const id of t.facilities) expect(FACILITY_BY_ID.has(id), `${l.id}: ${id}`).toBe(true);
+        for (const r of t.requires) expect(DISCOVERY_BY_ID.has(r), `${l.id}/${t.name}: ${r}`).toBe(true);
+        for (const id of Object.keys(t.build)) expect(isItem(id), `${l.id}/${t.name}: ${id}`).toBe(true);
+        if (i > 0) expect(eraIndex(t.era)).toBeGreaterThanOrEqual(eraIndex(l.tiers[i - 1].era));
+      });
+    }
+    for (const r of ROAD_TIERS) if (r.requires) expect(DISCOVERY_BY_ID.has(r.requires), r.name).toBe(true);
+    // Boats grow into ships, and airships have their own yards.
+    for (const id of ['canoe-yard', 'boatwright', 'shipyard', 'airship-yard']) expect(provided.has(id), id).toBe(true);
+    // A smelter grows from a bloomery into a foundry and beyond.
+    expect(LINES.find((l) => l.id === 'smelting')!.tiers.length).toBeGreaterThanOrEqual(4);
   });
 
   it('includes the facilities the design names', () => {

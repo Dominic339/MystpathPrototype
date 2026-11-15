@@ -37,7 +37,7 @@ export const PRODUCTS: Readonly<Record<string, string>> = {
   'carved-jade': 'Carved jade', 'amber-beads': 'Amber beads', leather: 'Leather', pelts: 'Pelts', linen: 'Linen', 'cotton-cloth': 'Cotton cloth', 'wool-cloth': 'Woollen cloth',
   canvas: 'Canvas', baskets: 'Baskets and mats', rope: 'Rope', dye: 'Dye', medicine: 'Medicine', candles: 'Candles and soap', 'wax-and-honey': 'Beeswax and honey',
   'meat-cuts': 'Meat cuts', 'smoked-fish': 'Smoked fish', 'smoked-meat': 'Smoked meat', flour: 'Flour', bread: 'Bread', preserves: 'Preserves', 'spice-blend': 'Spice blend',
-  'egg-dishes': 'Egg dishes', cheese: 'Cheese', 'salted-meat': 'Salted meat', 'salted-fish': 'Salted fish', pickles: 'Pickles', 'canned-food': 'Canned food', 'roast-poultry': 'Roast poultry', 'mana-cell': 'Mana cell', 'heat-core': 'Heat core', 'cold-core': 'Cold core', 'levitation-core': 'Levitation core', 'spirit-focus': 'Spirit focus',
+  'egg-dishes': 'Egg dishes', cheese: 'Cheese', 'salted-meat': 'Salted meat', 'salted-fish': 'Salted fish', pickles: 'Pickles', 'canned-food': 'Canned food', 'dugout-canoe': 'Dugout canoe', 'plank-boat': 'Plank boat', 'sailing-ship': 'Sailing ship', steamship: 'Steamship', airship: 'Airship', 'motor-airship': 'Motor airship', 'roast-poultry': 'Roast poultry', 'mana-cell': 'Mana cell', 'heat-core': 'Heat core', 'cold-core': 'Cold core', 'levitation-core': 'Levitation core', 'spirit-focus': 'Spirit focus',
 };
 
 const r = (id: string, name: string, facility: string, era: EraId, inputs: Record<string, number>, outputs: Record<string, number>, seconds = 60, requires?: string[]): Recipe => ({ id, name, facility, era, inputs, outputs, seconds, requires });
@@ -194,6 +194,13 @@ export const RECIPES: readonly Recipe[] = [
   r('blend-spices', 'Blend spices', 'kitchen', 'iron', { spices: 2 }, { 'spice-blend': 1 }, 60),
 
   // Magic
+  // Vehicles: canoes to airships.
+  r('carve-canoe', 'Carve a dugout canoe', 'canoe-yard', 'stone', { hardwood: 8, resin: 2, 'stone-tools': 1 }, { 'dugout-canoe': 1 }, 600, ['dugout-canoe']),
+  r('build-plank-boat', 'Build a plank boat', 'boatwright', 'iron', { lumber: 12, pitch: 3, rope: 2 }, { 'plank-boat': 1 }, 900, ['plank-boats']),
+  r('build-sailing-ship', 'Build a sailing ship', 'shipyard', 'medieval', { planks: 40, canvas: 12, rope: 12, 'iron-ingot': 4 }, { 'sailing-ship': 1 }, 2400, ['sailing']),
+  r('build-steamship', 'Build a steamship', 'steel-shipyard', 'industrial', { 'iron-ingot': 60, planks: 20, fuel: 10 }, { steamship: 1 }, 3000, ['steel']),
+  r('build-airship', 'Build an airship', 'airship-yard', 'renaissance', { canvas: 20, 'hardwood-beams': 8, rope: 10, 'levitation-core': 4 }, { airship: 1 }, 3600, ['airship']),
+  r('build-motor-airship', 'Build a motor airship', 'airship-works', 'industrial', { 'iron-ingot': 20, canvas: 30, 'levitation-core': 6, fuel: 10 }, { 'motor-airship': 1 }, 3600, ['steam-pumps']),
   r('attune-mana', 'Attune mana cell', 'crystal-attuner', 'medieval', { 'mana-crystal': 2 }, { 'mana-cell': 1 }, 150),
   r('bind-ember', 'Bind heat core', 'crystal-attuner', 'medieval', { 'ember-stone': 2 }, { 'heat-core': 1 }, 150),
   r('bind-frost', 'Bind cold core', 'crystal-attuner', 'medieval', { 'frost-shard': 2 }, { 'cold-core': 1 }, 150, ['cold-binding']),

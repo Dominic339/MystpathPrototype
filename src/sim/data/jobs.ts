@@ -2,6 +2,7 @@
 
 export const JOBS = [
   'forager',
+  'builder',
   'woodcutter',
   'stone-gatherer',
   'digger',
@@ -37,6 +38,7 @@ export type JobId = (typeof JOBS)[number];
 
 export const JOB_NAMES: Record<JobId, string> = {
   forager: 'Forager',
+  builder: 'Builder',
   woodcutter: 'Woodcutter',
   'stone-gatherer': 'Stone gatherer',
   digger: 'Digger',
@@ -74,14 +76,14 @@ export type Passion = (typeof PASSIONS)[number];
 
 /** Which jobs feel fulfilling for each passion. */
 export const PASSION_JOBS: Record<Passion, readonly JobId[]> = {
-  woodwork: ['woodcutter', 'carpenter', 'tapper'],
+  woodwork: ['woodcutter', 'carpenter', 'tapper', 'builder'],
   hunting: ['hunter', 'tanner'],
   fishing: ['fisher'],
-  stonework: ['stone-gatherer', 'knapper', 'quarrier', 'mason', 'miner'],
-  cooking: ['cook', 'forager', 'farmer'],
+  stonework: ['stone-gatherer', 'knapper', 'quarrier', 'mason', 'miner', 'builder'],
+  cooking: ['cook', 'forager', 'farmer', 'herder'],
   herbalism: ['forager', 'herbalist', 'dyer'],
-  weaving: ['weaver', 'dyer'],
-  metalwork: ['smelter', 'smith', 'miner'],
-  storytelling: [],
-  magic: ['arcanist', 'gemcutter'],
+  weaving: ['weaver', 'dyer', 'potter'],
+  metalwork: ['smelter', 'smith', 'miner', 'glassblower'],
+  storytelling: ['chandler', 'herbalist'],
+  magic: ['arcanist', 'gemcutter', 'chemist', 'refiner'],
 };

@@ -113,9 +113,23 @@ export function buildTerrain(field: Heightfield, camp: CampLayout, props: PropIn
         float grain = tNoise(vTerrainPos.xz * 1.7) * 0.6 + tNoise(vTerrainPos.xz * 6.3) * 0.4;
         diffuseColor.rgb *= 0.86 + grain * 0.26;
         // Footpaths worn by villagers: packed dirt with ragged edges.
-        float worn = texture2D(uWear, vTerrainPos.xz / uWorldSize + 0.5).r;
+        vec2 wearRoad = texture2D(uWear, vTerrainPos.xz / uWorldSize + 0.5).rg;
+        float worn = wearRoad.r;
         float pathMix = smoothstep(0.12, 0.55, worn + (tNoise(vTerrainPos.xz * 2.3) - 0.5) * 0.18);
-        diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.17, 0.11, 0.06) * (0.9 + grain * 0.25), pathMix * 0.85);`,
+        diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.17, 0.11, 0.06) * (0.9 + grain * 0.25), pathMix * 0.85);
+        // Built roads: trackways of packed light earth, then gravel, then cobbles and beyond.
+        float roadTier = wearRoad.g * 7.0;
+        float roadMix = smoothstep(0.15, 0.55, roadTier + (tNoise(vTerrainPos.xz * 1.8) - 0.5) * 0.25);
+        if (roadMix > 0.0) {
+          float pebble = step(0.72, tNoise(vTerrainPos.xz * 9.0));
+          vec3 track = vec3(0.24, 0.17, 0.11) * (0.88 + grain * 0.24) + pebble * 0.04;
+          vec3 gravel = vec3(0.3, 0.27, 0.22) * (0.8 + tNoise(vTerrainPos.xz * 14.0) * 0.4);
+          vec2 cell = fract(vTerrainPos.xz * 2.2);
+          float seam = smoothstep(0.0, 0.08, min(min(cell.x, cell.y), min(1.0 - cell.x, 1.0 - cell.y)));
+          vec3 cobble = vec3(0.32, 0.31, 0.29) * (0.7 + tHash(floor(vTerrainPos.xz * 2.2)) * 0.35) * (0.55 + seam * 0.45);
+          vec3 road = roadTier < 1.5 ? track : roadTier < 2.5 ? gravel : roadTier < 3.5 ? cobble : vec3(0.18, 0.18, 0.19) * (0.9 + grain * 0.2);
+          diffuseColor.rgb = mix(diffuseColor.rgb, road, roadMix * 0.92);
+        }`,
       );
   };
   const mesh = new THREE.Mesh(geo, mat);

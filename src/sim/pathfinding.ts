@@ -13,12 +13,15 @@ export class NavGrid {
   readonly cost: Float32Array;
   /** Foot traffic wear, 0..~1. */
   wear: Float32Array;
+  /** Road surface tier per cell (0 = none; see ROAD_TIERS). */
+  road: Uint8Array;
 
   constructor(terrain: Heightfield) {
     this.size = terrain.size;
     this.n = Math.floor(terrain.size / NAV_CELL);
     this.cost = new Float32Array(this.n * this.n);
     this.wear = new Float32Array(this.n * this.n);
+    this.road = new Uint8Array(this.n * this.n);
     for (let j = 0; j < this.n; j++)
       for (let i = 0; i < this.n; i++) {
         const { x, z } = this.cellCenter(i, j);
@@ -50,7 +53,8 @@ export class NavGrid {
 
   /** Cost of stepping into a cell, cheaper where the ground is worn into a path. */
   private stepCost(k: number): number {
-    return this.cost[k] * (1 - 0.6 * Math.min(1, this.wear[k]));
+    const road = this.road[k] ? 0.35 / (1 + this.road[k] * 0.15) : 1;
+    return this.cost[k] * (1 - 0.6 * Math.min(1, this.wear[k])) * road;
   }
 
   /** Nearest passable cell to a point (for targets at the water's edge). */
@@ -153,6 +157,11 @@ export class NavGrid {
       if (!this.passable(a.x + (b.x - a.x) * t, a.z + (b.z - a.z) * t)) return false;
     }
     return true;
+  }
+
+  roadAt(x: number, z: number): number {
+    const { i, j } = this.cellOf(x, z);
+    return this.road[j * this.n + i];
   }
 
   /** Feet wear the ground. */

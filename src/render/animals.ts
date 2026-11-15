@@ -329,3 +329,16 @@ export function buildAnimals(herds: { species: string; max: number }[], terrain:
 }
 
 export { FAUNA };
+
+/** A standing animal as one static piece (for kept animals in folds and pens). */
+export function staticAnimalGeometry(species: string, index: number): THREE.BufferGeometry | null {
+  const b = makeBody(species, index);
+  if (!b) return null;
+  const parts = [b.body.clone(), b.head.clone()];
+  for (const s of b.legSockets) parts.push(b.leg!.clone().translate(s.x, s.y, s.z));
+  const g = merge(parts);
+  g.scale(b.scale, b.scale, b.scale);
+  return g;
+}
+
+export const ANIMAL_MATERIAL = MAT;

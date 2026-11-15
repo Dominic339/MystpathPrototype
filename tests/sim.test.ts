@@ -145,6 +145,15 @@ describe('gathering simulation', () => {
     expect(w.spoilage.yesterday).toBeGreaterThan(0);
   });
 
+  it('the town builds, upgrades and grows', () => {
+    const w = createWorld(7);
+    for (let i = 0; i < 2400 * 20; i++) tick(w, 0.5); // twenty days
+    const done = w.structures.filter((s) => s.tier >= 0);
+    expect(done.length).toBeGreaterThan(2);
+    // Buildings never overlap each other.
+    for (const a of w.structures) for (const b of w.structures) if (a !== b) expect(Math.hypot(a.x - b.x, a.z - b.z)).toBeGreaterThan(3);
+  }, 120000);
+
   it('villagers make discoveries from their work and build inventions', () => {
     const w = createWorld(7);
     for (let i = 0; i < 2400 * 8; i++) tick(w, 0.5); // eight days
@@ -154,7 +163,7 @@ describe('gathering simulation', () => {
     const perDay = new Map<number, number>();
     for (const e of w.discoveryLog) perDay.set(e.day, (perDay.get(e.day) ?? 0) + 1);
     for (const n of perDay.values()) expect(n).toBeLessThanOrEqual(2);
-  });
+  }, 120000);
 
   it('paths avoid water', () => {
     const w = createWorld(7);

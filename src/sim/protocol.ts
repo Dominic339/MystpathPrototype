@@ -47,11 +47,32 @@ export interface Stats {
   /** Discoveries this era still needed to reach the next. */
   nextEra: { name: string; have: number; need: number } | null;
   events: { day: number; text: string }[];
-  built: string[];
+  /** Boats and airships the band owns. */
+  vehicles: { id: string; name: string; count: number }[];
+  buildings: { name: string; state: string; owner: string | null; workers: number }[];
+  population: number;
+  housing: number;
+  roads: string;
   /** Food storage in use, and food lost to spoiling yesterday (days of food for one person). */
   storage: string[];
   spoiledYesterday: number;
-  projects: { name: string; progress: number }[];
+}
+
+/** A building as the renderer needs it. */
+export interface StructureView {
+  id: number;
+  line: string;
+  /** Model of the finished tier being shown (or under construction). */
+  model: string;
+  /** 0..1 construction progress of the tier being built (1 = finished). */
+  built: number;
+  /** The previous tier's model stays up while an upgrade is built. */
+  previous: string | null;
+  x: number;
+  z: number;
+  rot: number;
+  variant: number;
+  animals: number;
 }
 
 export interface HexInfo {
@@ -63,6 +84,7 @@ export interface HexInfo {
   plants: { name: string; count: number; holds: string }[];
   animals: { name: string; count: number; holds: string }[];
   below: { name: string; qty: number }[];
+  buildings: string[];
 }
 
 export type FromSim =
@@ -80,6 +102,8 @@ export type FromSim =
     }
   | { type: 'tick'; totalSeconds: number; speed: number; villagers: Float32Array; herds: Float32Array }
   | { type: 'stats'; stats: Stats }
-  | { type: 'wear'; n: number; data: Float32Array }
+  | { type: 'wear'; n: number; data: Float32Array; roads: Uint8Array }
+  | { type: 'structures'; list: StructureView[] }
+  | { type: 'roster'; villagers: { id: number; name: string; look: number }[] }
   | { type: 'hexInfo'; info: HexInfo | null }
   | { type: 'saved'; json: string };

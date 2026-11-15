@@ -4,14 +4,15 @@
 import { PASSIONS, type Passion } from './data/jobs';
 import { stepHerds, type Herd } from './animals';
 import { DISCOVERIES } from './data/discoveries';
-import { spoilFood } from './food';
+import { dailyTown, growRoads, planTown, supplySites, type Structure } from './town';
+import { foodTotal, spoilFood } from './food';
 import { NavGrid } from './pathfinding';
 import { buildHexResources, buildNodes, regrowResources, type HexResources, type ResourceNode } from './resources';
 import { Rng, subSeed } from './rng';
 import { Heightfield } from './terrain';
 import { buildTestScene, type FlowField } from './testScene';
 import { calendar, GameClock, SEASONS } from './time';
-import { stepVillager, type Villager } from './villagerAI';
+import { materialNeeds, stepVillager, type Villager } from './villagerAI';
 
 export type PropKind =
   | 'oak' | 'pine' | 'birch' | 'apple' | 'hazel' | 'bush' | 'berrybush' | 'rock' | 'boulder' | 'reeds' | 'flowers'
@@ -58,12 +59,20 @@ export interface World {
   discoveryLog: { day: number; id: string; by: string | null }[];
   /** Materials and animal species the band has come across (some discoveries need them). */
   seen: string[];
-  /** Inventions the band has built (canoes, airships). */
+  /** Food storage the band has built (preservation.ts ids). */
   built: string[];
-  /** Inventions under construction: work done so far, in game seconds. */
-  projects: Record<string, number>;
   /** Food value lost to spoiling, today and yesterday. */
   spoilage: { day: number; today: number; yesterday: number };
+  /** Everything the town has built or is building. */
+  structures: Structure[];
+  nextStructureId: number;
+  planTimer: number;
+  lastTownDay: number;
+  /** Bumped when structures, the roster or the roads change, so the renderer knows to refresh. */
+  structuresVersion: number;
+  rosterVersion: number;
+  roadsVersion: number;
+  roadTimer: number;
   /** The chronicle: notable things that happened. */
   events: { t: number; text: string }[];
   nav: NavGrid;
@@ -131,8 +140,15 @@ export function createWorld(seed: number): World {
     discoveryLog: [],
     seen: [],
     built: [],
-    projects: {},
     spoilage: { day: 0, today: 0, yesterday: 0 },
+    structures: [],
+    nextStructureId: 1,
+    planTimer: 30,
+    lastTownDay: 0,
+    structuresVersion: 0,
+    rosterVersion: 0,
+    roadsVersion: 0,
+    roadTimer: 0,
     events: [],
     nav: new NavGrid(scene.terrain),
     villagers,
@@ -140,12 +156,11 @@ export function createWorld(seed: number): World {
   };
 }
 
-/** Grant every discovery and build every invention (debug and showcase). */
+/** Grant every discovery and a canoe and airship (debug and showcase). */
 export function grantAll(world: World): void {
-  for (const d of DISCOVERIES) {
-    if (!world.discoveries.includes(d.id)) world.discoveries.push(d.id);
-    if (d.build && !world.built.includes(d.id)) world.built.push(d.id);
-  }
+  for (const d of DISCOVERIES) if (!world.discoveries.includes(d.id)) world.discoveries.push(d.id);
+  world.stockpile['dugout-canoe'] = Math.max(1, world.stockpile['dugout-canoe'] ?? 0);
+  world.stockpile.airship = Math.max(1, world.stockpile.airship ?? 0);
 }
 
 function makeName(rng: Rng): string {
@@ -159,10 +174,18 @@ function makeName(rng: Rng): string {
 export function tick(world: World, dt: number): void {
   world.clock.totalSeconds += dt;
   const season = SEASONS.indexOf(calendar(world.clock.totalSeconds).season);
-  for (const v of world.villagers) stepVillager(world, v, dt);
+  for (let i = 0; i < world.villagers.length; i++) stepVillager(world, world.villagers[i], dt);
   const watchers = world.villagers.filter((v) => v.activity !== 'sleeping').map((v) => ({ x: v.x, z: v.z, stealth: v.task?.kind === 'gather' && v.task.stage === 'stalking' ? 0.6 : 0 }));
   stepHerds(world.herds, world.terrain, watchers, season, world.rng, dt);
   regrowResources(world.nodes, season, dt);
   spoilFood(world, season, dt);
+  supplySites(world);
+  planTown(world, materialNeeds(world), dt);
+  dailyTown(world, foodTotal(world));
+  world.roadTimer -= dt;
+  if (world.roadTimer <= 0) {
+    world.roadTimer = 30;
+    growRoads(world);
+  }
   world.nav.regrow(dt);
 }

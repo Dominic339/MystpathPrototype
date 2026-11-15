@@ -16,6 +16,9 @@ import { saveWorld } from './save';
 import { LAKE, RIVER } from './testScene';
 import { carryCategory, foodTotal, level } from './villagerAI';
 import { activeStorage } from './food';
+import { housingCapacity, lineOf, roadName, tierOf, underConstruction } from './town';
+import { PRODUCTS as ITEM_NAMES } from './data/processing';
+import type { StructureView } from './protocol';
 import { calendar } from './time';
 import { createWorld, grantAll, tick, type World } from './world';
 
@@ -86,15 +89,52 @@ function stats(w: World): Stats {
     }),
     nextEra: next ? { name: ERA_NAMES[next], have: w.discoveries.filter((id) => DISCOVERY_BY_ID.get(id)?.era === next).length, need: ERA_THRESHOLD } : null,
     events: w.events.slice(-12).reverse().map((e) => ({ day: calendar(e.t).dayIndex + 1, text: e.text })),
-    built: w.built.map((id) => DISCOVERY_BY_ID.get(id)?.name ?? id),
+    vehicles: VEHICLES.filter((id) => (w.stockpile[id] ?? 0) >= 1).map((id) => ({ id, name: ITEM_NAMES[id], count: Math.floor(w.stockpile[id]) })),
+    buildings: w.structures.map((s) => {
+      const l = lineOf(s);
+      const target = l.tiers[s.target];
+      const owner = w.villagers.find((v) => v.id === s.owner)?.name ?? null;
+      const workers = w.villagers.filter((v) => v.task && ((v.task.kind === 'gather' && v.task.target.type === 'structure' && v.task.target.id === s.id) || (v.task.kind === 'process' && v.task.structure === s.id) || (v.task.kind === 'build' && v.task.structure === s.id))).length;
+      let state = 'Working';
+      if (underConstruction(s)) {
+        const pct = Math.round((s.progress / target.seconds) * 100);
+        state = !s.supplied ? 'Waiting for materials' : `${pct}% built`;
+        if (s.tier >= 0) state = `Upgrading: ${state.toLowerCase()}`;
+      } else if (s.animals > 0) state = `Working · ${Math.floor(s.animals)} animals`;
+      return { name: tierOf(s)?.name ?? target.name, state, owner, workers };
+    }),
+    population: w.villagers.length,
+    housing: housingCapacity(w),
+    roads: roadName(w),
     storage: activeStorage(w).map((s) => s.name),
     spoiledYesterday: w.spoilage.yesterday,
-    projects: Object.entries(w.projects).map(([id, done]) => {
-      const d = DISCOVERY_BY_ID.get(id)!;
-      return { name: d.name, progress: Math.min(1, done / d.build!.seconds) };
-    }),
   };
 }
+
+const VEHICLES = ['dugout-canoe', 'plank-boat', 'sailing-ship', 'steamship', 'airship', 'motor-airship'];
+
+function structureViews(w: World): StructureView[] {
+  return w.structures.map((s) => {
+    const l = lineOf(s);
+    const shown = l.tiers[s.target];
+    return {
+      id: s.id,
+      line: s.line,
+      model: shown.model,
+      built: underConstruction(s) ? (s.supplied ? Math.min(0.999, s.progress / shown.seconds) : 0) : 1,
+      previous: underConstruction(s) && s.tier >= 0 ? l.tiers[s.tier].model : null,
+      x: s.x,
+      z: s.z,
+      rot: s.rot,
+      variant: s.variant,
+      animals: Math.floor(s.animals),
+    };
+  });
+}
+
+let sentStructures = -1;
+let sentRoster = -1;
+let lastStructurePost = 0;
 
 const summary = (m: Record<string, number>) =>
   Object.entries(m)
@@ -143,6 +183,7 @@ function hexInfo(w: World, q: number, r: number): FromSim & { type: 'hexInfo' } 
       below: Object.entries(h.below)
         .map(([id, qty]) => ({ name: itemName(id, MATERIAL_BY_ID), qty }))
         .sort((a, b) => b.qty - a.qty),
+      buildings: w.structures.filter((s) => s.hex === key).map((s) => tierOf(s)?.name ?? lineOf(s).tiers[s.target].name + ' (being built)'),
     },
   };
 }
@@ -171,6 +212,8 @@ self.onmessage = (e: MessageEvent<ToSim>) => {
       last = performance.now();
       lastStats = 0;
       lastWear = 0;
+      sentStructures = -1;
+      sentRoster = 0;
       break;
     }
     case 'setSpeed':
@@ -237,7 +280,19 @@ setInterval(() => {
     hb[o + 6] = h.vz * w.clock.speed;
     hb[o + 7] = speciesIndex(h.species);
   });
+  // Newcomers must exist on the renderer before their positions arrive.
+  if (w.rosterVersion !== sentRoster) {
+    sentRoster = w.rosterVersion;
+    post({ type: 'roster', villagers: w.villagers.map((v) => ({ id: v.id, name: v.name, look: v.look })) });
+  }
   post({ type: 'tick', totalSeconds: w.clock.totalSeconds, speed: w.clock.speed, villagers: buf, herds: hb }, [buf.buffer, hb.buffer]);
+  // Buildings: whenever they change, and every couple of seconds while any is going up.
+  const building = w.structures.some(underConstruction);
+  if (w.structuresVersion !== sentStructures || (building && now - lastStructurePost > 2000)) {
+    sentStructures = w.structuresVersion;
+    lastStructurePost = now;
+    post({ type: 'structures', list: structureViews(w) });
+  }
   if (now - lastStats > 1000) {
     lastStats = now;
     post({ type: 'stats', stats: stats(w) });
@@ -245,6 +300,7 @@ setInterval(() => {
   if (now - lastWear > 3000) {
     lastWear = now;
     const data = w.nav.wear.slice();
-    post({ type: 'wear', n: w.nav.n, data }, [data.buffer]);
+    const roads = w.nav.road.slice();
+    post({ type: 'wear', n: w.nav.n, data, roads }, [data.buffer, roads.buffer]);
   }
 }, 1000 / TICK_HZ);

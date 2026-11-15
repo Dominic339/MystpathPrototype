@@ -10,6 +10,7 @@
 //   q=low            skip ambient occlusion
 //   ui=0             hide the HUD
 //   inspect=x,z      open the hex inspector for the hex at this world position
+//   style=N          force one of the town styles (0-5)
 //   discover=all     grant every discovery and build every invention (or a comma list of ids)
 
 import * as THREE from 'three';
@@ -32,6 +33,8 @@ import { buildGrass } from './render/grass';
 import { buildCamp, type CampBuild } from './render/camp';
 import { buildVillagers, type VillagerView } from './render/villagers';
 import { buildAnimals, type AnimalsView } from './render/animals';
+import { townStyle } from './render/buildings';
+import { buildTown, type TownView } from './render/town';
 import { buildAirship } from './render/airship';
 import { buildHexOverlay } from './render/hexOverlay';
 import { CameraRig } from './render/cameraRig';
@@ -50,6 +53,8 @@ const showUi = params.get('ui') !== '0';
 // ---------- renderer ----------
 const app = document.getElementById('app')!;
 const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance', preserveDrawingBuffer: true });
+// Buildings under construction rise behind a clipping plane.
+renderer.localClippingEnabled = true;
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, lowQuality ? 1.5 : 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.shadowMap.enabled = true;
@@ -170,6 +175,7 @@ let boat: BoatView | null = null;
 let camp: CampBuild | null = null;
 let villagers: VillagerView | null = null;
 let animals: AnimalsView | null = null;
+let town: TownView | null = null;
 let hexOverlay: THREE.LineSegments | null = null;
 // Inventions only appear once the band has built them.
 const airship = buildAirship();
@@ -205,6 +211,8 @@ worker.onmessage = (e: MessageEvent<FromSim>) => {
     scene.add(boat.group);
     animals = buildAnimals(msg.herds, terrain, water);
     scene.add(animals.group);
+    town = buildTown(terrain, townStyle(seed, params.has('style') ? Number(params.get('style')) : undefined));
+    scene.add(town.group);
     scene.add(buildVegetation(msg.props, terrain));
     camp = buildCamp(msg.camp, terrain);
     scene.add(camp.group);
@@ -238,9 +246,14 @@ worker.onmessage = (e: MessageEvent<FromSim>) => {
     }
   } else if (msg.type === 'wear') {
     // Footpaths: wear from the simulation drawn on the terrain and flattening the grass.
-    const bytes = new Uint8Array(msg.n * msg.n);
-    for (let k = 0; k < bytes.length; k++) bytes[k] = Math.min(255, Math.round(Math.min(1, msg.data[k]) * 255));
-    const tex = new THREE.DataTexture(bytes, msg.n, msg.n, THREE.RedFormat);
+    // R: wear (roads count as fully worn, so grass stays flat on them); G: road tier.
+    const bytes = new Uint8Array(msg.n * msg.n * 2);
+    for (let k = 0; k < msg.n * msg.n; k++) {
+      const road = msg.roads[k];
+      bytes[k * 2] = road ? 255 : Math.min(255, Math.round(Math.min(1, msg.data[k]) * 255));
+      bytes[k * 2 + 1] = Math.round((road / 7) * 255);
+    }
+    const tex = new THREE.DataTexture(bytes, msg.n, msg.n, THREE.RGFormat);
     tex.magFilter = tex.minFilter = THREE.LinearFilter;
     tex.needsUpdate = true;
     globalUniforms.uWear.value.dispose();
@@ -248,8 +261,8 @@ worker.onmessage = (e: MessageEvent<FromSim>) => {
   } else if (msg.type === 'stats') {
     const prev = latestStats;
     latestStats = msg.stats;
-    const hasCanoe = msg.stats.built.includes('Dugout canoe');
-    const hasAirship = msg.stats.built.includes('Airship');
+    const hasCanoe = msg.stats.vehicles.some((v) => v.id === 'dugout-canoe' || v.id === 'plank-boat');
+    const hasAirship = msg.stats.vehicles.some((v) => v.id === 'airship' || v.id === 'motor-airship');
     if (boat) boat.group.visible = hasCanoe;
     airship.group.visible = hasAirship;
     followButtons[0].style.display = hasAirship ? '' : 'none';
@@ -258,6 +271,10 @@ worker.onmessage = (e: MessageEvent<FromSim>) => {
     const latest = msg.stats.events[0];
     if (latest && prev && prev.events[0]?.text !== latest.text) toast(latest.text);
     if (panel.style.display !== 'none') renderPanel();
+  } else if (msg.type === 'structures') {
+    town?.setStructures(msg.list);
+  } else if (msg.type === 'roster') {
+    villagers?.setRoster(msg.villagers.map((v) => v.look));
   } else if (msg.type === 'hexInfo') {
     showHexInfo(msg.info);
   } else if (msg.type === 'saved') {
@@ -338,7 +355,8 @@ function showHexInfo(info: HexInfo | null): void {
     <h4>Plants</h4><ul>${living(info.plants)}</ul>
     <h4>Animals</h4><ul>${living(info.animals)}</ul>
     <h4>On the ground</h4><ul>${list(info.ground)}</ul>
-    <h4>Below ground</h4><ul>${list(info.below)}</ul>`;
+    <h4>Below ground</h4><ul>${list(info.below)}</ul>
+    ${info.buildings.length ? `<h4>Buildings</h4><ul>${info.buildings.map((b) => `<li>${b}</li>`).join('')}</ul>` : ''}`;
   hexCard.style.display = 'block';
   hexCard.querySelector('.close')!.addEventListener('click', () => {
     hexCard.style.display = 'none';
@@ -375,13 +393,17 @@ function renderPanel(): void {
     .join('');
   const disc = st.discoveries.length ? st.discoveries.map((d) => `<li><span>${d.name}</span><span class="quiet">${d.by ?? ''}</span></li>`).join('') : '<li class="quiet">None yet. Villagers make discoveries through their work.</li>';
   const events = st.events.length ? st.events.map((e) => `<li><span class="quiet">Day ${e.day}</span> ${e.text}</li>`).join('') : '<li class="quiet">Nothing yet.</li>';
-  const making = [...st.projects.map((p) => `${p.name} (${pct(p.progress)} built)`), ...st.built.map((b) => `${b} ✓`)];
+  const buildings = st.buildings.length
+    ? st.buildings.map((b) => `<li><span>${b.name}${b.owner ? ` <span class="quiet">· ${b.owner}</span>` : ''}</span><span class="quiet">${b.state}${b.workers ? ` · ${b.workers} at work` : ''}</span></li>`).join('')
+    : '<li class="quiet">Nothing built yet. The band lives in its camp until it learns how to build.</li>';
+  const vehicles = st.vehicles.map((v) => `${v.name}${v.count > 1 ? ` ×${v.count}` : ''}`).join(', ');
   panel.innerHTML = `<button class="close" aria-label="Close">×</button><h3>Civilization</h3>
     <div class="row"><b>${st.era} era</b>${st.nextEra ? `<span class="quiet">${st.nextEra.name}: ${st.nextEra.have} of ${st.nextEra.need} discoveries</span>` : ''}</div>
     <div class="quiet">Food on hand: ${st.food.toFixed(1)} days for one person · spoiled yesterday: ${st.spoiledYesterday.toFixed(1)}</div>
     <div class="quiet">Food storage: ${st.storage.length ? st.storage.join(', ') : 'none yet (open air)'}</div>
     <h4>Discoveries</h4><ul>${disc}</ul>
-    ${making.length ? `<h4>Inventions</h4><ul>${making.map((m) => `<li>${m}</li>`).join('')}</ul>` : ''}
+    <div class="quiet">People: ${st.population} · beds: ${st.housing} · roads: ${st.roads}${vehicles ? ` · boats and craft: ${vehicles}` : ''}</div>
+    <h4>Buildings</h4><ul>${buildings}</ul>
     <h4>Chronicle</h4><ul class="chronicle">${events}</ul>
     <h3>People</h3>${people}<h3>Stockpile</h3>${stock}`;
   panel.querySelectorAll<HTMLButtonElement>('.inspire').forEach((b) =>

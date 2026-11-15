@@ -6,7 +6,7 @@
 
 import { HERD_FLEE, takeAnimal } from './animals';
 import { ACQUISITION, METHOD_BY_ID, type AcquisitionMethod } from './data/acquisition';
-import { DISCOVERIES, DISCOVERY_BY_ID } from './data/discoveries';
+import { eraIndex } from './data/eras';
 import { FAUNA_BY_ID } from './data/fauna';
 import { ENVIRONMENT_BY_ID } from './data/environments';
 import { JOBS, PASSION_JOBS, type JobId, type Passion } from './data/jobs';
@@ -14,16 +14,20 @@ import { MATERIAL_BY_ID } from './data/materials';
 import { FOODS } from './data/preservation';
 import { foodTotal } from './food';
 import { itemName, RECIPES, type Recipe } from './data/processing';
-import { gainInsight, knows, logEvent, noteSeen } from './discovery';
+import { FACILITY_BY_ID } from './data/facilities';
+import { currentEra, gainInsight, knows, logEvent, noteSeen } from './discovery';
+import { ROAD_TIERS } from './data/structures';
+import { bedFor, buildingWants, buildWork, lineOf, providedFacilities, tierOf, underConstruction, type Structure } from './town';
 import { hexToWorld } from './hex';
 import { RIVER } from './testScene';
+import { CYCLE_SECONDS, SEASONS } from './time';
 import { calendar } from './time';
 import type { World } from './world';
 
 export const ACTIVITIES = ['resting', 'walking', 'gathering', 'fetching-water', 'crafting', 'sleeping'] as const;
 export type Activity = (typeof ACTIVITIES)[number];
 
-export type Target = { type: 'node'; index: number } | { type: 'hex'; index: number } | { type: 'herd'; index: number };
+export type Target = { type: 'node'; index: number } | { type: 'hex'; index: number } | { type: 'herd'; index: number } | { type: 'structure'; id: number };
 
 export type Task =
   | {
@@ -35,8 +39,8 @@ export type Task =
       water: boolean;
       attempts: number;
     }
-  | { kind: 'process'; recipe: string; stage: 'going' | 'working'; spot: { x: number; z: number }; face: { x: number; z: number } }
-  | { kind: 'build'; invention: string; stage: 'going' | 'working'; spot: { x: number; z: number } }
+  | { kind: 'process'; recipe: string; stage: 'going' | 'working'; spot: { x: number; z: number }; face: { x: number; z: number }; structure?: number }
+  | { kind: 'build'; structure: number; stage: 'going' | 'working'; spot: { x: number; z: number } }
   | { kind: 'eat'; stage: 'going' | 'eating'; spot: { x: number; z: number } }
   | { kind: 'sleep'; stage: 'going' | 'sleeping'; spot: { x: number; z: number } }
   | { kind: 'idle'; stage: 'going' | 'resting'; spot: { x: number; z: number } };
@@ -80,7 +84,7 @@ export interface Villager {
 }
 
 const CAMP_FACILITIES = new Set(['campfire', 'knapping-spot', 'drying-rack', 'bone-carver']);
-const CAMP_RECIPES = RECIPES.filter((r) => CAMP_FACILITIES.has(r.facility));
+
 const WALK = 1.4;
 const STALK = 0.55;
 const CARRY_CAP = 8;
@@ -88,6 +92,7 @@ const HUNT_CARRY = 36;
 /** One fish takes this much of a shoal's count. */
 const FISH_SHARE = 0.1;
 const BUILD_CHUNK = 120;
+void CYCLE_SECONDS;
 
 const DOING: Record<string, string> = {
   forage: 'foraging', 'pick-wild-herbs': 'picking herbs', 'gather-deadwood': 'gathering deadwood', 'cut-fibres': 'cutting reeds',
@@ -101,9 +106,20 @@ const DOING: Record<string, string> = {
 const RAW_FOODS = Object.keys(FOODS).filter((id) => MATERIAL_BY_ID.has(id));
 const isCooked = (id: string) => FOODS[id]?.class === 'cooked';
 
-/** By-hand methods this band can use: no facility, required discoveries made, and the tools for it. */
-function availableMethods(world: World): AcquisitionMethod[] {
-  return ACQUISITION.filter((m) => m.facility === null && m.requires.every((r) => knows(world, r)) && (m.id !== 'canoe-fishing' || world.built.includes('dugout-canoe')));
+/** Methods this band can use: by hand, or at a building that provides the facility. */
+function availableMethods(world: World, provided: Map<string, Structure[]>): AcquisitionMethod[] {
+  return ACQUISITION.filter(
+    (m) =>
+      (m.facility === null || provided.has(m.facility)) &&
+      m.requires.every((r) => knows(world, r)) &&
+      (m.id !== 'canoe-fishing' || stock(world, 'dugout-canoe') >= 1),
+  );
+}
+
+/** Recipes this band can make: at the camp's own spots or at a building that provides the facility. */
+function availableRecipes(world: World, provided: Map<string, Structure[]>): Recipe[] {
+  const reach = eraIndex(currentEra(world)) + 1;
+  return RECIPES.filter((r) => (CAMP_FACILITIES.has(r.facility) || provided.has(r.facility)) && eraIndex(r.era) <= reach && (r.requires ?? []).every((d) => knows(world, d)));
 }
 
 /** Stock the group wants on hand, per villager where noted. */
@@ -128,6 +144,19 @@ function targets(people: number): Record<string, number> {
     'drinking-water': people,
     tallow: 4,
     'dried-fruit': people,
+    // A boat or two once the band can make them, and an airship eventually.
+    'dugout-canoe': 2,
+    'plank-boat': 2,
+    'sailing-ship': 1,
+    steamship: 1,
+    airship: 1,
+    'motor-airship': 1,
+    // Building materials kept on hand once the band can make them.
+    lumber: 10,
+    'cut-stone': 10,
+    pottery: 6,
+    planks: 10,
+    bricks: 10,
   };
 }
 
@@ -146,7 +175,7 @@ function need(have: number, want: number): number {
 }
 
 /** How much each material is wanted right now (0..1). */
-function materialNeeds(world: World): Record<string, number> {
+export function materialNeeds(world: World): Record<string, number> {
   const t = targets(world.villagers.length);
   const food = need(foodTotal(world), t.food);
   const wood = need(stock(world, 'hardwood') + stock(world, 'softwood'), t.wood);
@@ -159,15 +188,9 @@ function materialNeeds(world: World): Record<string, number> {
   n.bone = need(stock(world, 'bone'), 4);
   n.sinew = need(stock(world, 'sinew'), 4);
   n.feathers = need(stock(world, 'feathers') + stock(world, 'fletching') * 3, 6);
-  // Inventions under way pull in what they need.
-  for (const d of DISCOVERIES)
-    if (d.build && knows(world, d.id) && countBuilt(world, d.id) < d.build.want && world.projects[d.id] === undefined)
-      for (const [id, q] of Object.entries(d.build.inputs)) n[id] = Math.max(n[id] ?? 0, need(stock(world, id), q) * 0.8);
+  // Building sites waiting for materials pull them in.
+  for (const [id, missing] of Object.entries(buildingWants(world))) n[id] = Math.max(n[id] ?? 0, Math.min(1, 0.5 + missing / 20));
   return n;
-}
-
-function countBuilt(world: World, id: string): number {
-  return world.built.filter((b) => b === id).length;
 }
 
 function methodNeed(m: AcquisitionMethod, needs: Record<string, number>): number {
@@ -176,12 +199,12 @@ function methodNeed(m: AcquisitionMethod, needs: Record<string, number>): number
   return best;
 }
 
-function recipeNeed(world: World, r: Recipe): number {
-  if (r.requires && !r.requires.every((d) => knows(world, d))) return 0;
+function recipeNeed(world: World, r: Recipe, wants: Record<string, number>): number {
   for (const [id, q] of Object.entries(r.inputs)) if (stock(world, id) < q) return 0;
   const people = world.villagers.length;
   const t = targets(people);
   let best = 0;
+  for (const id of Object.keys(r.outputs)) if (wants[id]) best = Math.max(best, 0.75);
   for (const id of Object.keys(r.outputs)) {
     const out = FOODS[id];
     if (out) {
@@ -203,15 +226,26 @@ function recipeNeed(world: World, r: Recipe): number {
 }
 
 function recipeJob(r: Recipe): JobId {
-  const fac: Record<string, JobId> = { campfire: 'cook', 'knapping-spot': 'knapper', 'drying-rack': 'tanner', 'bone-carver': 'knapper' };
-  return fac[r.facility] ?? 'cook';
+  return FACILITY_BY_ID.get(r.facility)?.job ?? 'cook';
 }
 
-type Choice = { job: JobId; score: number; method?: string; recipe?: string; invention?: string };
+type Choice = { job: JobId; score: number; method?: string; recipe?: string; site?: number };
+
+/** Villagers working at (or heading to) a building. */
+function workersAt(world: World, id: number): number {
+  let n = 0;
+  for (const v of world.villagers) {
+    const t = v.task;
+    if (t && ((t.kind === 'gather' && t.target.type === 'structure' && t.target.id === id) || (t.kind === 'process' && t.structure === id))) n++;
+  }
+  return n;
+}
 
 /** Rank every available job for this villager. */
 export function rankJobs(world: World, v: Villager): Choice[] {
   const needs = materialNeeds(world);
+  const wants = buildingWants(world);
+  const provided = providedFacilities(world);
   const passionJobs = PASSION_JOBS[v.passion];
   const talentJobs = PASSION_JOBS[v.talent];
   const out: Choice[] = [];
@@ -224,29 +258,38 @@ export function rankJobs(world: World, v: Villager): Choice[] {
   };
   // With nothing pressing, people practise what they love: passion work is always a little wanted.
   const floor = (job: JobId) => (passionJobs.includes(job) ? 0.12 : 0);
-  for (const m of availableMethods(world)) {
-    const base = Math.max(methodNeed(m, needs), floor(m.job));
+  for (const m of availableMethods(world, provided)) {
+    // Working at a building beats doing the same by hand.
+    const base = Math.max(methodNeed(m, needs), floor(m.job)) * (m.facility ? 1.25 : 1);
     if (base <= 0) continue;
     out.push({ job: m.job, score: weigh(m.job, base), method: m.id });
   }
-  for (const r of CAMP_RECIPES) {
-    const base = recipeNeed(world, r);
+  for (const r of availableRecipes(world, provided)) {
+    const base = recipeNeed(world, r, wants);
     if (base <= 0) continue;
     const job = recipeJob(r);
     out.push({ job, score: weigh(job, base), recipe: r.id });
   }
-  for (const d of DISCOVERIES) {
-    if (!d.build || !knows(world, d.id) || countBuilt(world, d.id) >= d.build.want) continue;
-    const started = world.projects[d.id] !== undefined;
-    if (!started && !Object.entries(d.build.inputs).every(([id, q]) => stock(world, id) >= q)) continue;
-    out.push({ job: d.build.job, score: weigh(d.build.job, 0.6), invention: d.id });
+  // Building sites with their materials in hand need builders.
+  for (const st of world.structures) {
+    if (!underConstruction(st) || !st.supplied) continue;
+    const l = lineOf(st);
+    const fits = passionJobs.includes(l.job) || passionJobs.includes('builder') ? 0.15 : 0;
+    out.push({ job: 'builder', score: weigh('builder', 0.55 + fits), site: st.id });
   }
   out.sort((a, b) => b.score - a.score);
   return out;
 }
 
-function stationFor(world: World, recipe: Recipe): { spot: { x: number; z: number }; face: { x: number; z: number } } {
+function stationFor(world: World, recipe: Recipe): { spot: { x: number; z: number }; face: { x: number; z: number }; structure?: number } | null {
   const c = world.camp;
+  if (!CAMP_FACILITIES.has(recipe.facility)) {
+    const at = (providedFacilities(world).get(recipe.facility) ?? []).find((s) => workersAt(world, s.id) < Math.max(1, tierOf(s)?.workers ?? 1));
+    if (!at) return null;
+    const a = world.rng.next() * Math.PI * 2;
+    const spot = world.nav.nearestPassable(at.x + Math.cos(a) * 2.5, at.z + Math.sin(a) * 2.5) ?? { x: at.x, z: at.z };
+    return { spot, face: { x: at.x, z: at.z }, structure: at.id };
+  }
   const target = recipe.facility === 'campfire' ? c.fire : recipe.facility === 'drying-rack' ? c.rack : c.woodpile;
   const a = world.rng.next() * Math.PI * 2;
   const r = recipe.facility === 'campfire' ? 1.9 : 1.4;
@@ -291,6 +334,15 @@ function chooseTarget(world: World, m: AcquisitionMethod, needs: Record<string, 
     best = f;
   };
   const jitter = () => 0.8 + world.rng.next() * 0.4;
+
+  // Facility methods are worked at the building that provides them.
+  if (m.facility) {
+    const at = (providedFacilities(world).get(m.facility) ?? []).find((s) => workersAt(world, s.id) < Math.max(1, tierOf(s)?.workers ?? 1));
+    if (!at) return null;
+    const a = world.rng.next() * Math.PI * 2;
+    const spot = world.nav.nearestPassable(at.x + Math.cos(a) * 3, at.z + Math.sin(a) * 3);
+    return spot ? { target: { type: 'structure', id: at.id }, spot, water: false } : null;
+  }
 
   if (m.source === 'plant' || m.source === 'fixed' || m.source === 'ground') {
     const kind = m.source === 'plant' ? 'plant' : m.source === 'fixed' ? 'fixed' : 'ground';
@@ -373,8 +425,7 @@ function decide(world: World, v: Villager): void {
     return;
   }
   if (bedtime) {
-    const t = c.tents[v.tent % c.tents.length];
-    const spot = { x: t.x, z: t.z };
+    const spot = bedFor(world, v);
     v.task = { kind: 'sleep', stage: 'going', spot };
     v.job = null;
     startPath(world, v, spot);
@@ -399,27 +450,27 @@ function decide(world: World, v: Villager): void {
     }
     if (choice.recipe) {
       const r = RECIPES.find((x) => x.id === choice.recipe)!;
+      const st = stationFor(world, r);
+      if (!st) continue;
       // Reserve the inputs now so two villagers don't use the same materials.
       for (const [id, q] of Object.entries(r.inputs)) world.stockpile[id] = stock(world, id) - q;
-      const st = stationFor(world, r);
-      v.task = { kind: 'process', recipe: r.id, stage: 'going', spot: st.spot, face: st.face };
+      v.task = { kind: 'process', recipe: r.id, stage: 'going', spot: st.spot, face: st.face, structure: st.structure };
       v.job = recipeJob(r);
       startPath(world, v, st.spot);
       return;
     }
-    if (choice.invention) {
-      const d = DISCOVERY_BY_ID.get(choice.invention)!;
-      if (world.projects[d.id] === undefined) {
-        for (const [id, q] of Object.entries(d.build!.inputs)) world.stockpile[id] = stock(world, id) - q;
-        world.projects[d.id] = 0;
-        logEvent(world, `${v.name} started building a ${d.name.toLowerCase()}.`);
-      }
-      const site = d.build!.site === 'riverbank' ? riverbankSite(world) : { x: c.woodpile.x + 3, z: c.woodpile.z + 3 };
+    if (choice.site !== undefined) {
+      const st = world.structures.find((x) => x.id === choice.site);
+      if (!st) continue;
       const a = world.rng.next() * Math.PI * 2;
-      const spot = world.nav.nearestPassable(site.x + Math.cos(a) * 1.5, site.z + Math.sin(a) * 1.5) ?? site;
-      v.task = { kind: 'build', invention: d.id, stage: 'going', spot };
-      v.job = d.build!.job;
-      startPath(world, v, spot);
+      const r = 2.5 + world.rng.next() * 2;
+      const spot = world.nav.nearestPassable(st.x + Math.cos(a) * r, st.z + Math.sin(a) * r) ?? { x: st.x, z: st.z };
+      v.task = { kind: 'build', structure: st.id, stage: 'going', spot };
+      v.job = 'builder';
+      if (!startPath(world, v, spot)) {
+        v.task = null;
+        continue;
+      }
       return;
     }
   }
@@ -437,7 +488,8 @@ function face(v: Villager, x: number, z: number): void {
 
 /** Walk along the current path. Returns true on arrival. */
 function walk(world: World, v: Villager, dt: number): boolean {
-  let remaining = WALK * dt;
+  const speed = WALK * ROAD_TIERS[world.nav.roadAt(v.x, v.z)].speed;
+  let remaining = speed * dt;
   v.vx = 0;
   v.vz = 0;
   while (remaining > 0 && v.path.length) {
@@ -454,8 +506,8 @@ function walk(world: World, v: Villager, dt: number): boolean {
       v.x += (dx / d) * remaining;
       v.z += (dz / d) * remaining;
       v.heading = Math.atan2(dx, dz);
-      v.vx = (dx / d) * WALK;
-      v.vz = (dz / d) * WALK;
+      v.vx = (dx / d) * speed;
+      v.vz = (dz / d) * speed;
       remaining = 0;
     }
   }
@@ -533,7 +585,8 @@ export function stepVillager(world: World, v: Villager, dt: number): void {
       const job = recipeJob(r);
       if (task.stage === 'going') {
         task.stage = 'working';
-        v.timer = workSeconds(v, job, r.seconds);
+        const at = task.structure !== undefined ? world.structures.find((x) => x.id === task.structure) : undefined;
+        v.timer = workSeconds(v, job, r.seconds) / (at ? tierOf(at)?.speed ?? 1 : 1);
       }
       v.activity = 'crafting';
       face(v, task.face.x, task.face.z);
@@ -548,10 +601,9 @@ export function stepVillager(world: World, v: Villager, dt: number): void {
       return;
     }
     case 'build': {
-      const d = DISCOVERY_BY_ID.get(task.invention)!;
-      const b = d.build!;
-      if (world.projects[d.id] === undefined) {
-        v.task = null; // someone else finished it
+      const st = world.structures.find((x) => x.id === task.structure);
+      if (!st || !underConstruction(st)) {
+        v.task = null; // finished or gone
         return;
       }
       if (task.stage === 'going') {
@@ -559,18 +611,15 @@ export function stepVillager(world: World, v: Villager, dt: number): void {
         v.timer = BUILD_CHUNK;
       }
       v.activity = 'crafting';
-      const speed = 1 + level(v.skills[b.job] ?? 0) * 0.03;
-      world.projects[d.id] += dt * speed;
+      face(v, st.x, st.z);
+      const speed = 1 + level(v.skills.builder ?? 0) * 0.03;
       v.timer -= dt;
-      if (world.projects[d.id] >= b.seconds) {
-        delete world.projects[d.id];
-        world.built.push(d.id);
-        addXp(v, b.job, 40);
-        const n = countBuilt(world, d.id);
-        logEvent(world, `${v.name} finished the band's ${n === 1 ? 'first' : 'next'} ${d.name.toLowerCase()}.`);
+      if (buildWork(world, st, dt * speed, v)) {
+        addXp(v, 'builder', 30);
         v.task = null;
       } else if (v.timer <= 0) {
-        addXp(v, b.job, 10);
+        addXp(v, 'builder', 10);
+        gainInsight(world, v, 'build:' + st.line, 'builder', level(v.skills.builder ?? 0), 'building');
         v.task = null; // take a break and think again; the work is kept
       }
       return;
@@ -583,7 +632,8 @@ export function stepVillager(world: World, v: Villager, dt: number): void {
       }
       if (task.stage === 'going') {
         task.stage = 'working';
-        v.timer = workSeconds(v, m.job, m.seconds);
+        const at = task.target.type === 'structure' ? world.structures.find((x) => x.id === (task.target as { id: number }).id) : undefined;
+        v.timer = workSeconds(v, m.job, m.seconds) / (at ? tierOf(at)?.speed ?? 1 : 1);
       }
       if (task.stage === 'working') {
         v.activity = task.water ? 'fetching-water' : 'gathering';
@@ -592,7 +642,15 @@ export function stepVillager(world: World, v: Villager, dt: number): void {
         v.timer -= dt;
         if (v.timer > 0) return;
         if (task.target.type === 'herd') fishCycle(world, v, m, world.herds[task.target.index]);
-        else collect(world, v, m, task.target);
+        else if (task.target.type === 'structure') {
+          const at = world.structures.find((x) => x.id === (task.target as { id: number }).id);
+          if (at) facilityCycle(world, v, m, at);
+          // Work done at a building goes straight into the town's store.
+          addXp(v, m.job, 8);
+          gainInsight(world, v, m.id, m.job, level(v.skills[m.job] ?? 0), DOING[m.id] ?? `working at the ${tierOf(at!)?.name.toLowerCase() ?? 'workshop'}`);
+          deliver(world, v);
+          return;
+        } else collect(world, v, m, task.target);
         finishCycle(world, v, m, task);
         return;
       }
@@ -603,6 +661,7 @@ export function stepVillager(world: World, v: Villager, dt: number): void {
 }
 
 function targetPos(world: World, t: Target): { x: number; z: number } {
+  if (t.type === 'structure') return world.structures.find((s) => s.id === t.id) ?? world.camp.center;
   if (t.type === 'node') return world.nodes[t.index];
   if (t.type === 'herd') return world.herds[t.index];
   return hexToWorld(world.hexes[t.index]);
@@ -718,6 +777,89 @@ function fishCycle(world: World, v: Villager, m: AcquisitionMethod, h: World['he
   if (Object.keys(v.carrying).length === 0) v.carrying = {};
 }
 
+/** Crops grow in the warm seasons. */
+const FARM_SEASON = [0.4, 0.9, 1.3, 0.05];
+
+/**
+ * One cycle at an acquisition building. It draws on what is really around it: trees near a
+ * woodcutters' camp, the deposits under a quarry, herds near a lodge, shoals by a fishing hut.
+ * Farms grow their own crops with the seasons; folds and coops need their kept animals.
+ */
+function facilityCycle(world: World, v: Villager, m: AcquisitionMethod, at: Structure): void {
+  const take = (src: Record<string, number>, id: string, want: number) => {
+    const n = Math.min(want, Math.floor(src[id] ?? 0));
+    if (n <= 0) return 0;
+    src[id] -= n;
+    v.carrying[id] = (v.carrying[id] ?? 0) + n;
+    noteSeen(world, id);
+    return n;
+  };
+  const season = SEASONS.indexOf(calendar(world.clock.totalSeconds).season);
+  const roll = (y: number) => Math.floor(y) + (world.rng.next() < y % 1 ? 1 : 0);
+  switch (m.source) {
+    case 'plant': {
+      for (const [id, y] of Object.entries(m.yields)) {
+        let want = roll(y);
+        for (const n of world.nodes) {
+          if (want <= 0) break;
+          if (n.kind !== 'plant' || Math.hypot(n.x - at.x, n.z - at.z) > 45) continue;
+          if (m.species && !m.species.includes(n.species ?? '')) continue;
+          want -= take(n.stock, id, want);
+        }
+      }
+      return;
+    }
+    case 'ground':
+    case 'below': {
+      // The building's own hex first, then its neighbours.
+      const near = world.hexes.filter((h) => Math.hypot(hexToWorld(h).x - at.x, hexToWorld(h).z - at.z) < 20);
+      for (const [id, y] of Object.entries(m.yields)) {
+        let want = roll(y);
+        for (const h of near) {
+          if (want <= 0) break;
+          want -= take(m.source === 'below' ? h.below : h.ground, id, want);
+        }
+      }
+      return;
+    }
+    case 'water':
+      for (const [id, y] of Object.entries(m.yields)) if (id === 'fresh-water') v.carrying[id] = (v.carrying[id] ?? 0) + roll(y);
+      return;
+    case 'herd': {
+      const h = world.herds.filter((x) => x.count >= 1 && !x.species.endsWith('fish') && Math.hypot(x.x - at.x, x.z - at.z) < 110).sort((a, b) => b.count - a.count)[0];
+      if (!h || world.rng.next() > 0.7) return;
+      const sp = FAUNA_BY_ID.get(h.species)!;
+      for (const [id, y] of Object.entries(sp.yields)) v.carrying[id] = (v.carrying[id] ?? 0) + roll(y);
+      takeAnimal(h);
+      noteSeen(world, h.species);
+      return;
+    }
+    case 'shoal': {
+      const h = world.herds.filter((x) => x.species.endsWith('fish') && Math.hypot(x.x - at.x, x.z - at.z) < 60).sort((a, b) => b.count - a.count)[0];
+      if (!h) return;
+      fishCycle(world, v, m, h);
+      return;
+    }
+    case 'farm':
+      for (const [id, y] of Object.entries(m.yields)) {
+        const n = roll(y * FARM_SEASON[season] * 0.4);
+        if (n > 0) v.carrying[id] = (v.carrying[id] ?? 0) + n;
+      }
+      return;
+    case 'livestock': {
+      if (at.animals <= 0) return;
+      const herd = Math.min(1, at.animals / 8);
+      for (const [id, y] of Object.entries(m.yields)) {
+        const n = roll(y * herd * 0.5);
+        if (n > 0) v.carrying[id] = (v.carrying[id] ?? 0) + n;
+      }
+      // Some animals go for meat.
+      if (m.yields['game-meat'] || m.yields.poultry) at.animals = Math.max(2, at.animals - 0.5);
+      return;
+    }
+  }
+}
+
 function collect(world: World, v: Villager, m: AcquisitionMethod, target: Target): void {
   if (m.source === 'water' && target.type === 'hex') {
     const w = ENVIRONMENT_BY_ID.get(world.hexes[target.index].env)?.water;
@@ -727,6 +869,7 @@ function collect(world: World, v: Villager, m: AcquisitionMethod, target: Target
     }
     return;
   }
+  if (target.type === 'structure' || target.type === 'herd') return;
   const src = target.type === 'node' ? world.nodes[target.index].stock : world.hexes[target.index].ground;
   if (target.type === 'node') {
     const n = world.nodes[target.index];

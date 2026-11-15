@@ -361,6 +361,8 @@ export interface VillagerView {
   update: (dt: number, time: number) => void;
   /** World position of a villager, for camera follow. */
   positionOf: (index: number) => THREE.Vector3 | null;
+  /** Newcomers: make figures for any villagers not yet drawn. */
+  setRoster: (looks: number[]) => void;
 }
 
 export function buildVillagers(looks: number[], terrain: Heightfield): VillagerView {
@@ -372,15 +374,25 @@ export function buildVillagers(looks: number[], terrain: Heightfield): VillagerV
     return f;
   });
   let initialised = false;
+  const fresh = new Set<number>();
   let tickAt = performance.now();
 
   return {
     group,
+    setRoster(all) {
+      for (let i = figures.length; i < all.length; i++) {
+        const f = makeFigure(all[i], i);
+        group.add(f.root);
+        figures.push(f);
+        fresh.add(i);
+      }
+    },
     positionOf: (i) => (figures[i] ? figures[i].root.position.clone() : null),
     setTargets(buf) {
       tickAt = performance.now();
       figures.forEach((f, k) => {
         const o = k * VILLAGER_STRIDE;
+        if (o + VILLAGER_STRIDE > buf.length) return;
         f.tx = buf[o];
         f.tz = buf[o + 1];
         f.theading = buf[o + 2];
@@ -392,10 +404,11 @@ export function buildVillagers(looks: number[], terrain: Heightfield): VillagerV
           f.bundle.visible = f.carry >= 0;
           if (f.carry >= 0) f.bundle.material = mat(CARRY_COLORS[f.carry] ?? '#8a6a46', 0.95);
         }
-        if (!initialised) {
+        if (!initialised || fresh.has(k)) {
           f.x = f.tx;
           f.z = f.tz;
           f.heading = f.theading;
+          fresh.delete(k);
         }
       });
       initialised = true;

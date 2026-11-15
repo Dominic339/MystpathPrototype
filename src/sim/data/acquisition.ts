@@ -82,7 +82,7 @@ export const ACQUISITION: readonly AcquisitionMethod[] = [
   a('poultry-keeping', 'Keeping chickens', 'herder', 'stone', 'chicken-coop', 'livestock', 120, { eggs: 6, feathers: 3, poultry: 3 }, { species: ['junglefowl'], requires: ['poultry-farming'] }),
   a('cattle-keeping', 'Keeping cattle', 'herder', 'iron', 'cattle-pasture', 'livestock', 120, { milk: 8, 'game-meat': 6, hides: 2, bone: 3 }, { species: ['aurochs'], requires: ['cattle-herding'] }),
   a('grain-farming', 'Grain farming', 'farmer', 'stone', 'farm', 'farm', 120, { 'wild-grain': 15, roots: 12 }, { requires: ['agriculture'] }),
-  a('fibre-farming', 'Fibre farming', 'farmer', 'stone', 'farm', 'farm', 120, { flax: 8, cotton: 8, hemp: 8 }, { requires: ['fibre-crops'] }),
+  a('fibre-farming', 'Fibre farming', 'farmer', 'stone', 'fibre-field', 'farm', 120, { flax: 8, cotton: 8, hemp: 8 }, { requires: ['fibre-crops'] }),
   a('herb-growing', 'Herb growing', 'farmer', 'stone', 'herb-garden', 'farm', 120, { herbs: 6, 'dye-plants': 4 }, { requires: ['herb-gardening'] }),
   a('spice-growing', 'Spice growing', 'farmer', 'iron', 'spice-plantation', 'farm', 120, { spices: 5 }, { requires: ['spice-cultivation'] }),
   a('mushroom-growing', 'Mushroom growing', 'farmer', 'iron', 'mushroom-cellar', 'farm', 120, { mushrooms: 8 }, { requires: ['mushroom-cultivation'] }),
