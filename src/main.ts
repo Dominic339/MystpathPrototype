@@ -16,6 +16,7 @@ import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { GTAOPass } from 'three/addons/postprocessing/GTAOPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { Heightfield } from './sim/terrain';
 import { calendar, CYCLE_SECONDS, DAY_SECONDS } from './sim/time';
 import { VILLAGER_STRIDE, type FromSim, type ToSim } from './sim/protocol';
@@ -77,6 +78,25 @@ scene.add(sun, sun.target);
 const hemi = new THREE.HemisphereLight('#bcd4f0', '#4a3f2c', 0.8);
 scene.add(hemi);
 
+// Image-based lighting: the sky is rendered into an environment map (refreshed as the
+// time of day changes), giving soft, directional fill light and sky reflections.
+const pmrem = new THREE.PMREMGenerator(renderer);
+const envScene = new THREE.Scene();
+envScene.add(new THREE.Mesh(sky.mesh.geometry, sky.mesh.material));
+let envTarget: THREE.WebGLRenderTarget | null = null;
+let envUpdatedAt = -Infinity;
+let envGameSeconds = -Infinity;
+function refreshEnvironment(gameSeconds: number, now: number): void {
+  if (now - envUpdatedAt < 3 && Math.abs(gameSeconds - envGameSeconds) < 20) return;
+  envUpdatedAt = now;
+  envGameSeconds = gameSeconds;
+  const next = pmrem.fromScene(envScene, 0.04, 1, 6000);
+  envTarget?.dispose();
+  envTarget = next;
+  scene.environment = next.texture;
+}
+scene.environmentIntensity = 0.55;
+
 // ---------- post-processing ----------
 const composer = new EffectComposer(renderer);
 composer.addPass(new RenderPass(scene, camera));
@@ -103,6 +123,31 @@ if (!lowQuality) {
 const bloom = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 0.32, 0.6, 0.92);
 composer.addPass(bloom);
 composer.addPass(new OutputPass());
+
+// Colour grading in display space: gentle S-curve contrast, slightly richer colour,
+// cool shadows and warm highlights, and a soft vignette.
+const grade = new ShaderPass({
+  uniforms: { tDiffuse: { value: null }, uNight: { value: 0 } },
+  vertexShader: /* glsl */ `varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+  fragmentShader: /* glsl */ `
+    uniform sampler2D tDiffuse;
+    uniform float uNight;
+    varying vec2 vUv;
+    void main() {
+      vec3 c = texture2D(tDiffuse, vUv).rgb;
+      c = mix(c, c * c * (3.0 - 2.0 * c), 0.22);
+      float l = dot(c, vec3(0.299, 0.587, 0.114));
+      c = mix(vec3(l), c, 1.07);
+      vec3 cool = vec3(0.96, 0.99, 1.05);
+      vec3 warm = vec3(1.04, 1.0, 0.95);
+      c *= mix(cool, warm, smoothstep(0.15, 0.75, l));
+      c = mix(c, c * vec3(0.85, 0.92, 1.12), uNight * 0.35);
+      vec2 d = vUv - 0.5;
+      c *= 1.0 - dot(d, d) * 0.55;
+      gl_FragColor = vec4(clamp(c, 0.0, 1.0), 1.0);
+    }`,
+});
+composer.addPass(grade);
 
 window.addEventListener('resize', () => {
   camera.aspect = window.innerWidth / window.innerHeight;
@@ -277,7 +322,10 @@ function frame(): void {
   sun.intensity = s.lightIntensity;
   hemi.color.copy(s.hemiSky);
   hemi.groundColor.copy(s.hemiGround);
-  hemi.intensity = s.hemiIntensity;
+  hemi.intensity = s.hemiIntensity * (0.55 + s.night * 0.6);
+  refreshEnvironment(gameSeconds, realTime);
+  scene.environmentIntensity = 0.35 + (1 - s.night) * 0.4;
+  grade.uniforms.uNight.value = s.night;
   (scene.fog as THREE.FogExp2).color.copy(s.fogColor);
   renderer.toneMappingExposure = s.exposure;
   if (water) {

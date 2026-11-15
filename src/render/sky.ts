@@ -49,7 +49,7 @@ export function skyState(totalSeconds: number): SkyState {
   const useMoon = elev < -0.02;
   const lightDir = useMoon ? moonDir : sunDir;
   const lightColor = useMoon ? MOON.clone() : SUN_DAY.clone().lerp(SUN_GOLD, golden);
-  const lightIntensity = useMoon ? 0.35 * THREE.MathUtils.smoothstep(-elev, 0.02, 0.25) : 3.6 * THREE.MathUtils.smoothstep(elev, -0.02, 0.18);
+  const lightIntensity = useMoon ? 0.75 * THREE.MathUtils.smoothstep(-elev, 0.02, 0.25) : 3.6 * THREE.MathUtils.smoothstep(elev, -0.02, 0.18);
 
   const hemiSky = zenith.clone().lerp(new THREE.Color('#ffffff'), 0.25);
   const hemiGround = new THREE.Color('#4a3f2c').lerp(NIGHT_ZENITH, night * 0.8);

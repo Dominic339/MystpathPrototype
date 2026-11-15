@@ -94,6 +94,11 @@ export interface Figure {
   shoulderR: THREE.Group;
   elbowL: THREE.Group;
   elbowR: THREE.Group;
+  skirtL: THREE.Group;
+  skirtR: THREE.Group;
+  /** Pose being shown, eased toward each new target so transitions are smooth. */
+  current: PoseParams | null;
+  walkBlend: number;
   x: number;
   z: number;
   heading: number;
@@ -169,9 +174,8 @@ export function makeFigure(lookIndex: number, seed: number): Figure {
 
   // Fur tunic over the torso, flaring to mid-thigh, with a fringed hem and belt.
   const tunicProfile = [
-    new THREE.Vector2(0.0, -0.3),
-    new THREE.Vector2(0.21, -0.3),
-    new THREE.Vector2(0.2, -0.18),
+    new THREE.Vector2(0.0, -0.05),
+    new THREE.Vector2(0.168, -0.05),
     new THREE.Vector2(0.17, 0.0),
     new THREE.Vector2(0.155, 0.12),
     new THREE.Vector2(0.175, 0.26),
@@ -182,8 +186,21 @@ export function makeFigure(lookIndex: number, seed: number): Figure {
   ];
   const tunicMesh = mesh(spine, new THREE.LatheGeometry(tunicProfile, 16), tunic);
   tunicMesh.scale.set(1.1 * b, 1, 0.74 * b);
-  const hem = mesh(spine, new THREE.CylinderGeometry(0.215, 0.235, 0.05, 16, 1, true), trim, 0, -0.3, 0);
-  hem.scale.set(1.1 * b, 1, 0.74 * b);
+  // Skirt of the tunic: left and right halves hang from the hips and swing with each thigh,
+  // so legs never push through the cloth. The halves overlap slightly at front and back.
+  const skirtHalf = (side: number) => {
+    const g = new THREE.Group();
+    hips.add(g);
+    const start = side < 0 ? Math.PI - 0.18 : -0.18;
+    const panel = mesh(g, new THREE.CylinderGeometry(0.172, 0.232, 0.36, 10, 2, true, start, Math.PI + 0.36), tunic, 0, -0.12, 0);
+    panel.scale.set(1.12 * b, 1, 0.78 * b);
+    (panel.material as THREE.Material).side = THREE.DoubleSide;
+    const hemPart = mesh(g, new THREE.CylinderGeometry(0.234, 0.244, 0.045, 10, 1, true, start, Math.PI + 0.36), trim, 0, -0.3, 0);
+    hemPart.scale.set(1.12 * b, 1, 0.78 * b);
+    return g;
+  };
+  const skirtL = skirtHalf(-1);
+  const skirtR = skirtHalf(1);
   const belt = mesh(spine, new THREE.TorusGeometry(0.16, 0.018, 6, 18), hide, 0, 0.11, 0);
   belt.rotation.x = Math.PI / 2;
   belt.scale.set(1.08 * b, 0.72 * b, 1);
@@ -258,6 +275,10 @@ export function makeFigure(lookIndex: number, seed: number): Figure {
     shoulderR: AR.shoulder,
     elbowL: AL.elbow,
     elbowR: AR.elbow,
+    skirtL,
+    skirtR,
+    current: null,
+    walkBlend: 0,
     x: 0,
     z: 0,
     heading: 0,
@@ -275,7 +296,29 @@ function hipDrop(thigh: number, knee: number): number {
   return HIP_HEIGHT - legHeight;
 }
 
-export function pose(f: Figure, p: { tl: number; tr: number; kl: number; kr: number; sl: number; sr: number; el: number; er: number; spine: number; bob?: number; headYaw?: number }): void {
+export interface PoseParams {
+  tl: number;
+  tr: number;
+  kl: number;
+  kr: number;
+  sl: number;
+  sr: number;
+  el: number;
+  er: number;
+  spine: number;
+  bob?: number;
+  headYaw?: number;
+}
+
+const POSE_KEYS: (keyof PoseParams)[] = ['tl', 'tr', 'kl', 'kr', 'sl', 'sr', 'el', 'er', 'spine', 'bob', 'headYaw'];
+
+function blendPose(a: PoseParams, b: PoseParams, t: number): PoseParams {
+  const out = { ...a };
+  for (const k of POSE_KEYS) out[k] = (a[k] ?? 0) + ((b[k] ?? 0) - (a[k] ?? 0)) * t;
+  return out;
+}
+
+export function pose(f: Figure, p: PoseParams): void {
   f.thighL.rotation.x = -p.tl;
   f.thighR.rotation.x = -p.tr;
   f.kneeL.rotation.x = p.kl;
@@ -289,6 +332,11 @@ export function pose(f: Figure, p: { tl: number; tr: number; kl: number; kr: num
   f.head.rotation.x = -p.spine * 0.5;
   const drop = Math.min(hipDrop(p.tl, p.kl), hipDrop(p.tr, p.kr));
   f.hips.position.y = HIP_HEIGHT - Math.max(0, drop) + (p.bob ?? 0);
+  // Skirt halves follow their thighs part of the way, and flare a little when crouching.
+  f.skirtL.rotation.x = -p.tl * 0.75;
+  f.skirtR.rotation.x = -p.tr * 0.75;
+  f.skirtL.rotation.z = -Math.max(0, p.tl - 0.6) * 0.25;
+  f.skirtR.rotation.z = Math.max(0, p.tr - 0.6) * 0.25;
 }
 
 export interface VillagerView {
@@ -329,6 +377,8 @@ export function buildVillagers(looks: number[], terrain: Heightfield): VillagerV
     update(dt, time) {
       for (const f of figures) {
         const k = Math.min(1, dt * 8);
+        const ox = f.x;
+        const oz = f.z;
         f.x += (f.tx - f.x) * k;
         f.z += (f.tz - f.z) * k;
         let dh = f.theading - f.heading;
@@ -337,36 +387,42 @@ export function buildVillagers(looks: number[], terrain: Heightfield): VillagerV
         f.root.position.set(f.x, terrain.sample(f.x, f.z), f.z);
         f.root.rotation.y = f.heading;
 
+        // Drive the walk cycle from the distance actually covered, so feet never slide.
+        const moved = Math.hypot(f.x - ox, f.z - oz);
+        const speed = dt > 0 ? moved / dt : 0;
         const act = ACTIVITY_CODES[f.activity] ?? 'resting';
-        const walking = act === 'walking';
-        f.phase += dt * (walking ? 6.8 : 1.5);
+        const walking = act === 'walking' && speed > 0.15;
+        f.walkBlend += ((walking ? 1 : 0) - f.walkBlend) * Math.min(1, dt * 6);
+        const STRIDE = 1.55; // metres per full cycle (two steps)
+        f.phase += walking ? (moved / STRIDE) * Math.PI * 2 : dt * 1.5;
         const s = Math.sin(f.phase);
         const c = Math.cos(f.phase);
-        if (walking) {
-          // Knees bend as each leg swings through; elbows stay softly bent.
-          pose(f, {
-            tl: s * 0.5,
-            tr: -s * 0.5,
-            kl: Math.max(0, -c) * 0.9 + 0.08,
-            kr: Math.max(0, c) * 0.9 + 0.08,
-            sl: -s * 0.42,
-            sr: s * 0.42,
-            el: 0.35 + Math.max(0, s) * 0.3,
-            er: 0.35 + Math.max(0, -s) * 0.3,
-            spine: 0.06,
-            bob: Math.abs(c) * 0.03,
-          });
-        } else if (act === 'gathering') {
-          // Bend at the hips and knees and pick at the ground.
+        // Stride length scales gently with speed; the swing leg's knee bends as it comes forward.
+        const amp = THREE.MathUtils.clamp(0.25 + speed * 0.18, 0.25, 0.55);
+        const walkPose: PoseParams = {
+          tl: s * amp,
+          tr: -s * amp,
+          kl: Math.max(0, c) * (0.35 + amp) + 0.06,
+          kr: Math.max(0, -c) * (0.35 + amp) + 0.06,
+          sl: -s * amp * 0.8,
+          sr: s * amp * 0.8,
+          el: 0.3 + Math.max(0, -s) * 0.25,
+          er: 0.3 + Math.max(0, s) * 0.25,
+          spine: 0.05,
+          bob: Math.abs(s) * -0.025 + 0.012,
+          headYaw: 0,
+        };
+
+        let target: PoseParams;
+        if (act === 'gathering') {
           const pick = Math.sin(time * 3 + f.phase);
-          pose(f, { tl: 0.55, tr: 0.25, kl: 0.9, kr: 0.45, sl: 1.0 + pick * 0.2, sr: 0.8 - pick * 0.2, el: 0.6, er: 0.9, spine: 0.55 + Math.sin(time * 2.2 + f.phase) * 0.08 });
+          target = { tl: 0.55, tr: 0.25, kl: 0.9, kr: 0.45, sl: 1.0 + pick * 0.2, sr: 0.8 - pick * 0.2, el: 0.6, er: 0.9, spine: 0.55 + Math.sin(time * 2.2 + f.phase) * 0.08, bob: 0, headYaw: 0 };
         } else if (act === 'fetching-water') {
-          // Deep crouch at the water's edge, reaching forward.
-          pose(f, { tl: 1.35, tr: 1.0, kl: 2.2, kr: 1.9, sl: 1.1, sr: 1.25, el: 0.4, er: 0.5, spine: 0.4 });
+          target = { tl: 1.35, tr: 1.0, kl: 2.2, kr: 1.9, sl: 1.1, sr: 1.25, el: 0.4, er: 0.5, spine: 0.4, bob: 0, headYaw: 0 };
         } else {
-          // Idle by the fire: weight shifts and small gestures.
+          // Idle: weight shifts and small gestures.
           const g = Math.sin(time * 1.1 + f.phase);
-          pose(f, {
+          target = {
             tl: 0.02,
             tr: -0.04 + Math.sin(time * 0.3 + f.phase) * 0.04,
             kl: 0.05,
@@ -376,9 +432,14 @@ export function buildVillagers(looks: number[], terrain: Heightfield): VillagerV
             el: 0.2,
             er: 0.9 + g * 0.35,
             spine: 0,
+            bob: 0,
             headYaw: Math.sin(time * 0.4 + f.phase) * 0.45,
-          });
+          };
         }
+        target = blendPose(target, walkPose, f.walkBlend);
+        // Ease the displayed pose toward the target (the walk itself is applied directly).
+        f.current = f.current ? blendPose(f.current, target, f.walkBlend > 0.5 ? 1 : Math.min(1, dt * 5)) : target;
+        pose(f, f.current);
       }
     },
   };
