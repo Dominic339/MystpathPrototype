@@ -3,6 +3,7 @@
 // trees, bushes, rocks, reeds — are resource nodes villagers gather from directly.
 
 import { ENVIRONMENT_BY_ID, type EnvironmentId } from './data/environments';
+import { FEATURE_BY_ID } from './data/features';
 import { MATERIAL_BY_ID, type Rarity } from './data/materials';
 import { HEX_SIZE, hexesInRadius, hexKey, hexToWorld, type Hex } from './hex';
 import { hash01 } from './rng';
@@ -25,6 +26,8 @@ export interface HexResources {
 export interface ResourceNode {
   /** Index into world.props. */
   prop: number;
+  /** World feature kind (wild hive, bird nests, herb patch), if this node is one. */
+  feature?: string;
   x: number;
   z: number;
   stock: Record<string, number>;
@@ -128,6 +131,7 @@ export function buildNodes(seed: number, props: PropInstance[]): ResourceNode[] 
   const nodes: ResourceNode[] = [];
   props.forEach((p, i) => {
     let stock: Record<string, number> | null = null;
+    let feature: string | undefined;
     switch (p.kind) {
       case 'oak':
       case 'birch':
@@ -137,8 +141,8 @@ export function buildNodes(seed: number, props: PropInstance[]): ResourceNode[] 
         stock = { softwood: 3, resin: 2 };
         break;
       case 'bush':
-        // The renderer draws berries on some bush variants; match roughly with a hash.
-        stock = hash01(seed, i, 9) > 0.45 ? { berries: 6 } : { herbs: 2 };
+        // Berry bushes only (the renderer draws berries on some variants).
+        if (hash01(seed, i, 9) > 0.45) stock = { berries: 6 };
         break;
       case 'rock':
         stock = hash01(seed, i, 5) > 0.6 ? { stone: 3, flint: 2 } : { stone: 4 };
@@ -150,12 +154,19 @@ export function buildNodes(seed: number, props: PropInstance[]): ResourceNode[] 
         stock = { reeds: 6 };
         break;
       case 'flowers':
-        stock = { herbs: 2, 'dye-plants': 1 };
+        feature = 'herb-patch';
+        break;
+      case 'beehive':
+        feature = 'wild-hive';
+        break;
+      case 'nest':
+        feature = 'bird-nests';
         break;
     }
+    if (feature) stock = { ...FEATURE_BY_ID.get(feature)!.yields };
     if (!stock) return;
     for (const k of Object.keys(stock)) if (!stock[k]) delete stock[k];
-    nodes.push({ prop: i, x: p.x, z: p.z, stock, max: { ...stock } });
+    nodes.push({ prop: i, feature, x: p.x, z: p.z, stock, max: { ...stock } });
   });
   return nodes;
 }
@@ -168,11 +179,14 @@ export function regrowResources(hexes: HexResources[], nodes: ResourceNode[], dt
       const cur = h.surface[id] ?? 0;
       if (cur < h.surfaceMax[id]) h.surface[id] = Math.min(h.surfaceMax[id], cur + h.surfaceMax[id] * rate);
     }
-  for (const n of nodes)
+  for (const n of nodes) {
+    // Wild features recover at their own (slower) pace.
+    const r = n.feature ? dt / FEATURE_BY_ID.get(n.feature)!.regrowSeconds : rate;
     for (const id in n.max) {
       const cur = n.stock[id] ?? 0;
-      // Stone does not grow back; plants and deadwood do.
+      // Stone does not grow back; plants, deadwood, hives and nests do.
       if (id === 'stone' || id === 'flint') continue;
-      if (cur < n.max[id]) n.stock[id] = Math.min(n.max[id], cur + n.max[id] * rate);
+      if (cur < n.max[id]) n.stock[id] = Math.min(n.max[id], cur + n.max[id] * r);
     }
+  }
 }

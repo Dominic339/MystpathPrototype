@@ -7,7 +7,7 @@ import type { World } from './world';
 import { buildTestScene } from './testScene';
 import { NavGrid } from './pathfinding';
 
-export const SAVE_VERSION = 2;
+export const SAVE_VERSION = 3;
 
 export interface SaveFile {
   version: number;
@@ -20,6 +20,7 @@ export interface SaveFile {
   hexes: World['hexes'];
   nodes: World['nodes'];
   stockpile: World['stockpile'];
+  discoveries: World['discoveries'];
   wear: string;
   villagers: World['villagers'];
 }
@@ -41,6 +42,7 @@ export function saveWorld(world: World): SaveFile {
     hexes: world.hexes,
     nodes: world.nodes,
     stockpile: world.stockpile,
+    discoveries: world.discoveries,
     wear: encodeFloats(world.nav.wear),
     villagers: world.villagers,
   };
@@ -67,6 +69,7 @@ export function loadWorld(save: SaveFile): World {
     hexes: clone(save.hexes),
     nodes: clone(save.nodes),
     stockpile: clone(save.stockpile),
+    discoveries: [...(save.discoveries ?? [])],
     nav,
     villagers: clone(save.villagers),
   };

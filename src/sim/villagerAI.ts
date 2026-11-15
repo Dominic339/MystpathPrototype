@@ -4,7 +4,6 @@
 // Hunter-gatherer era: only by-hand gathering and the camp's own crafting spots.
 
 import { ACQUISITION, type AcquisitionMethod } from './data/acquisition';
-import { eraIndex } from './data/eras';
 import { JOBS, PASSION_JOBS, type JobId, type Passion } from './data/jobs';
 import { FOOD_VALUE, MATERIAL_BY_ID } from './data/materials';
 import { RECIPES, type Recipe } from './data/processing';
@@ -51,8 +50,10 @@ export interface Villager {
   fulfilment: number;
 }
 
-export const ERA = 'hunter-gatherer';
-const AVAILABLE_METHODS = ACQUISITION.filter((m) => m.facility === null && eraIndex(m.era) <= eraIndex(ERA));
+/** By-hand methods this band can use: no facility needed, and any required discoveries made. */
+function availableMethods(world: World): AcquisitionMethod[] {
+  return ACQUISITION.filter((m) => m.facility === null && m.requires.every((r) => world.discoveries.includes(r)));
+}
 const CAMP_FACILITIES = new Set(['campfire', 'knapping-spot', 'drying-rack', 'bone-carver']);
 const AVAILABLE_RECIPES = RECIPES.filter((r) => CAMP_FACILITIES.has(r.facility));
 const WALK = 1.4;
@@ -122,6 +123,7 @@ function materialNeeds(world: World): Record<string, number> {
   n.hides = need(stock(world, 'hides') + stock(world, 'cured-hide'), 4);
   n.bone = need(stock(world, 'bone'), 4);
   n.sinew = need(stock(world, 'sinew'), 4);
+  n.feathers = need(stock(world, 'feathers') + stock(world, 'fletching') * 3, 6);
   return n;
 }
 
@@ -165,7 +167,7 @@ export function rankJobs(world: World, v: Villager): { job: JobId; score: number
     const habit = v.job === job ? 0.15 : 0;
     return base * (1 + passion + habit) * (1 + lv * 0.04) * (0.85 + world.rng.next() * 0.3);
   };
-  for (const m of AVAILABLE_METHODS) {
+  for (const m of availableMethods(world)) {
     if (m.id === 'collect-ice' || m.id === 'beachcomb') continue; // nothing to collect here
     const base = methodNeed(m, needs);
     if (base <= 0) continue;
@@ -201,6 +203,8 @@ function chooseTarget(world: World, m: AcquisitionMethod, needs: Record<string, 
   const camp = world.camp.center;
   for (let i = 0; i < world.nodes.length; i++) {
     const n = world.nodes[i];
+    // Feature methods (hives, nests) only work at their feature; other methods skip features.
+    if ((m.feature ?? null) !== (n.feature ?? null)) continue;
     const s = value(n.stock);
     if (!s) continue;
     const d = Math.hypot(n.x - camp.x, n.z - camp.z);
@@ -211,7 +215,7 @@ function chooseTarget(world: World, m: AcquisitionMethod, needs: Record<string, 
       best = { target: { type: 'node', index: i }, spot: { x: n.x, z: n.z }, water: false };
     }
   }
-  for (let i = 0; i < world.hexes.length; i++) {
+  for (let i = 0; i < world.hexes.length && !m.feature; i++) {
     const h = world.hexes[i];
     const s = value(h.surface);
     if (!s) continue;

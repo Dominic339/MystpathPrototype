@@ -202,6 +202,25 @@ function scatterProps(seed: number, terrain: Heightfield, n: Noise2D): PropInsta
     else if (r < 0.16) add('rock', x, z, rng.range(0.4, 0.9));
   }
 
+  // World features: wild beehives in hollow logs at the foot of broadleaf trees,
+  // and bird nests along the banks.
+  const oaks = props.filter((p) => p.kind === 'oak' && Math.hypot(p.x - CAMP_CENTER.x, p.z - CAMP_CENTER.z) < 120);
+  for (let k = 0; k < 5 && oaks.length; k++) {
+    const o = oaks[Math.floor(rng.next() * oaks.length)];
+    const a = rng.next() * Math.PI * 2;
+    add('beehive', o.x + Math.cos(a) * 1.6, o.z + Math.sin(a) * 1.6, rng.range(0.9, 1.1));
+  }
+  let nests = 0;
+  for (let attempt = 0; attempt < 4000 && nests < 7; attempt++) {
+    const x = rng.range(-half, half);
+    const z = rng.range(-half, half);
+    const above = terrain.sample(x, z) - terrain.waterLevel;
+    if (above > 0.35 && above < 1.0 && terrain.slope(x, z) < 0.4 && Math.hypot(x - CAMP_CENTER.x, z - CAMP_CENTER.z) < 130) {
+      add('nest', x, z, rng.range(0.9, 1.15));
+      nests++;
+    }
+  }
+
   // A few lone meadow trees near camp for composition.
   add('oak', CAMP_CENTER.x + 22, CAMP_CENTER.z - 6, 1.35);
   add('oak', CAMP_CENTER.x - 24, CAMP_CENTER.z + 14, 1.15);

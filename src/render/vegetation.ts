@@ -243,6 +243,81 @@ function flowers(seed: number): THREE.BufferGeometry {
   return merge(parts);
 }
 
+/** A wild beehive in a fallen hollow log, with comb showing at the opening and bees about. */
+function beehive(seed: number): THREE.BufferGeometry {
+  const parts: THREE.BufferGeometry[] = [];
+  const len = 1.8;
+  const r = 0.38;
+  const shell = new THREE.CylinderGeometry(r, r * 1.08, len, 12, 3, true);
+  shell.rotateZ(Math.PI / 2);
+  shell.translate(0, r * 0.9, 0);
+  parts.push(part(shell, (p) => mix(color('#3a2a1c'), color('#6a5038'), noise3(p.x * 3, p.y * 8, p.z * 8) * 0.5 + 0.5)));
+  const inner = new THREE.CylinderGeometry(r * 0.78, r * 0.82, len * 0.98, 12, 1, true);
+  inner.rotateZ(Math.PI / 2);
+  inner.translate(0, r * 0.9, 0);
+  // Flip inner faces so the hollow reads from outside.
+  inner.scale(1, 1, -1);
+  parts.push(part(inner, color('#20160e')));
+  // Bark rim and a broken stub of branch.
+  for (const sx of [-len / 2, len / 2]) {
+    const rim = new THREE.TorusGeometry(r * 0.9, r * 0.12, 6, 14);
+    rim.rotateY(Math.PI / 2);
+    rim.translate(sx, r * 0.9, 0);
+    parts.push(part(rim, color('#4a3524')));
+  }
+  parts.push(part(limb(V(0.2, r * 1.6, 0), V(0.5, r * 2.6, 0.2), 0.07, 0.03, 5), color('#4a3524')));
+  // Honeycomb filling the open end.
+  const comb = new THREE.CircleGeometry(r * 0.76, 6);
+  comb.rotateY(Math.PI / 2);
+  comb.translate(len / 2 - 0.08, r * 0.9, 0);
+  parts.push(part(comb, (p) => (Math.floor((p.y + p.z * 0.6) * 22) % 2 ? color('#d9a02a') : color('#b07818'))));
+  // A few bees in the air near the entrance.
+  for (let k = 0; k < 9; k++) {
+    const b = new THREE.SphereGeometry(0.025, 5, 4);
+    b.scale(1.4, 1, 1);
+    b.translate(len / 2 + 0.15 + hash01(seed, 1, k) * 0.5, r * 0.6 + hash01(seed, 2, k) * 0.8, (hash01(seed, 3, k) - 0.5) * 0.8);
+    parts.push(part(b, k % 2 ? color('#e0b030') : color('#2a2010')));
+  }
+  return merge(parts);
+}
+
+/** Ground nests of reeds and twigs along the bank, with eggs and a few feathers. */
+function nest(seed: number): THREE.BufferGeometry {
+  const parts: THREE.BufferGeometry[] = [];
+  for (let n = 0; n < 2; n++) {
+    const cx = n === 0 ? 0 : 0.7;
+    const cz = n === 0 ? 0 : 0.45;
+    const R = n === 0 ? 0.28 : 0.22;
+    for (let k = 0; k < 22; k++) {
+      const a = (k / 22) * Math.PI * 2 + hash01(seed, n, k);
+      const b = a + 1.1 + hash01(seed, n + 3, k) * 0.6;
+      const h = 0.05 + hash01(seed, n + 5, k) * 0.08;
+      parts.push(part(limb(V(cx + Math.cos(a) * R, h, cz + Math.sin(a) * R), V(cx + Math.cos(b) * R * 1.05, h + 0.03, cz + Math.sin(b) * R * 1.05), 0.012, 0.01, 3), k % 3 ? color('#8a7448') : color('#5e4a2c')));
+    }
+    const bowl = new THREE.SphereGeometry(R * 0.85, 10, 5, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2);
+    bowl.scale(1, 0.35, 1);
+    bowl.translate(cx, 0.1, cz);
+    parts.push(part(bowl, color('#6e5a36')));
+    const eggs = n === 0 ? 3 : 2;
+    for (let e = 0; e < eggs; e++) {
+      const egg = new THREE.SphereGeometry(0.045, 8, 6);
+      egg.scale(1, 1.25, 1);
+      egg.rotateZ(1.2);
+      egg.translate(cx + Math.cos(e * 2.1) * 0.07, 0.1, cz + Math.sin(e * 2.1) * 0.07);
+      parts.push(part(egg, n === 0 ? color('#cfe0e0') : color('#e8dcc4')));
+    }
+  }
+  // Loose feathers on the ground.
+  for (let k = 0; k < 3; k++) {
+    const fth = new THREE.PlaneGeometry(0.05, 0.18);
+    fth.rotateX(-Math.PI / 2 + 0.1);
+    fth.rotateY(hash01(seed, 9, k) * Math.PI * 2);
+    fth.translate(0.35 + k * 0.2, 0.02, -0.3 + k * 0.15);
+    parts.push(part(fth, color('#d8d4cc')));
+  }
+  return merge(parts);
+}
+
 const VARIANTS = 3;
 
 interface BuiltKind {
@@ -265,6 +340,8 @@ function buildKind(kind: PropKind, v: number): BuiltKind {
     case 'boulder': return { geo: { wood: rock(seed + 5, 2.2) }, sway: 0, flat: true, shadow: true, density: 1 };
     case 'reeds': return { geo: { wood: reeds(seed) }, sway: 0.05, flat: false, shadow: false, density: 1 };
     case 'flowers': return { geo: { wood: flowers(seed) }, sway: 0.25, flat: false, shadow: false, density: 1 };
+    case 'beehive': return { geo: { wood: beehive(seed) }, sway: 0, flat: false, shadow: true, density: 1 };
+    case 'nest': return { geo: { wood: nest(seed) }, sway: 0, flat: false, shadow: false, density: 1 };
   }
 }
 

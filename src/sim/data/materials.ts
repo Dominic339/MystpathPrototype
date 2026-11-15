@@ -1,4 +1,4 @@
-// The 102 base (raw) materials — the inputs to every production chain.
+// The 103 base (raw) materials — the inputs to every production chain.
 // Each comes from the surface (collected), the subsurface (mined), water, or animals.
 
 export type Layer = 'surface' | 'subsurface' | 'water' | 'animal';
@@ -15,6 +15,8 @@ export interface Material {
   perishable?: boolean;
   /** Proposed in the design doc rather than settled. */
   proposed?: boolean;
+  /** Only comes from farming or husbandry, never found wild. */
+  farmedOnly?: boolean;
 }
 
 const m = (id: string, name: string, category: Category, layer: Layer, rarity: Rarity = 'common', extra: Partial<Material> = {}): Material => ({ id, name, category, layer, rarity, ...extra });
@@ -116,7 +118,7 @@ export const MATERIALS: readonly Material[] = [
   m('cork', 'Cork bark', 'plant', 'surface', 'uncommon'),
   m('spices', 'Spices', 'plant', 'surface', 'uncommon'),
 
-  // Animal materials (12)
+  // Animal materials (13)
   m('game-meat', 'Game meat', 'animal', 'animal', 'common', { perishable: true }),
   m('fish', 'Fish', 'animal', 'animal', 'common', { perishable: true }),
   m('shellfish', 'Shellfish', 'animal', 'animal', 'common', { perishable: true }),
@@ -129,6 +131,7 @@ export const MATERIALS: readonly Material[] = [
   m('honey', 'Honey and beeswax', 'animal', 'animal', 'uncommon'),
   m('wool', 'Wool', 'animal', 'animal'),
   m('eggs', 'Eggs', 'animal', 'animal', 'common', { perishable: true }),
+  m('poultry', 'Poultry', 'animal', 'animal', 'common', { perishable: true, farmedOnly: true }),
 
   // Magical materials (6)
   m('mana-crystal', 'Mana crystals', 'magic', 'subsurface', 'rare'),
@@ -159,6 +162,7 @@ export const FOOD_VALUE: Readonly<Record<string, number>> = {
   fish: 0.35,
   shellfish: 0.25,
   eggs: 0.2,
+  poultry: 0.35,
   honey: 0.25,
   seaweed: 0.1,
 };

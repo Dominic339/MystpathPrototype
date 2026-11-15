@@ -35,7 +35,7 @@ export const PRODUCTS: Readonly<Record<string, string>> = {
   'carved-jade': 'Carved jade', 'amber-beads': 'Amber beads', leather: 'Leather', pelts: 'Pelts', linen: 'Linen', 'cotton-cloth': 'Cotton cloth', 'wool-cloth': 'Woollen cloth',
   canvas: 'Canvas', baskets: 'Baskets and mats', rope: 'Rope', dye: 'Dye', medicine: 'Medicine', candles: 'Candles and soap', 'wax-and-honey': 'Beeswax and honey',
   'meat-cuts': 'Meat cuts', 'smoked-fish': 'Smoked fish', 'smoked-meat': 'Smoked meat', flour: 'Flour', bread: 'Bread', preserves: 'Preserves', 'spice-blend': 'Spice blend',
-  'egg-dishes': 'Egg dishes', 'mana-cell': 'Mana cell', 'heat-core': 'Heat core', 'cold-core': 'Cold core', 'levitation-core': 'Levitation core', 'spirit-focus': 'Spirit focus',
+  'egg-dishes': 'Egg dishes', 'roast-poultry': 'Roast poultry', 'mana-cell': 'Mana cell', 'heat-core': 'Heat core', 'cold-core': 'Cold core', 'levitation-core': 'Levitation core', 'spirit-focus': 'Spirit focus',
 };
 
 const r = (id: string, name: string, facility: string, era: EraId, inputs: Record<string, number>, outputs: Record<string, number>, seconds = 60): Recipe => ({ id, name, facility, era, inputs, outputs, seconds });
@@ -49,6 +49,7 @@ export const RECIPES: readonly Recipe[] = [
   r('roast-nuts', 'Roast nuts', 'campfire', 'hunter-gatherer', { nuts: 2 }, { 'roasted-food': 1 }, 15),
   r('roast-mushrooms', 'Roast mushrooms', 'campfire', 'hunter-gatherer', { mushrooms: 2 }, { 'roasted-food': 1 }, 15),
   r('cook-eggs', 'Cook eggs', 'campfire', 'hunter-gatherer', { eggs: 2 }, { 'egg-dishes': 1 }, 15),
+  r('roast-poultry', 'Roast poultry', 'campfire', 'stone', { poultry: 1 }, { 'roast-poultry': 1 }, 20),
   r('bake-flatbread', 'Bake flatbread', 'campfire', 'hunter-gatherer', { 'wild-grain': 3, 'fresh-water': 1 }, { flatbread: 2 }, 30),
   r('render-fat', 'Render fat', 'campfire', 'hunter-gatherer', { 'animal-fat': 2 }, { tallow: 1 }, 30),
   r('make-resin-glue', 'Make resin glue', 'campfire', 'hunter-gatherer', { resin: 2 }, { 'resin-glue': 1 }, 25),

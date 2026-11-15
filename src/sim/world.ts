@@ -10,7 +10,7 @@ import { buildTestScene, type FlowField } from './testScene';
 import { GameClock } from './time';
 import { stepVillager, type Villager } from './villagerAI';
 
-export type PropKind = 'oak' | 'pine' | 'birch' | 'bush' | 'rock' | 'boulder' | 'reeds' | 'flowers';
+export type PropKind = 'oak' | 'pine' | 'birch' | 'bush' | 'rock' | 'boulder' | 'reeds' | 'flowers' | 'beehive' | 'nest';
 
 export interface PropInstance {
   kind: PropKind;
@@ -46,6 +46,8 @@ export interface World {
   hexes: HexResources[];
   nodes: ResourceNode[];
   stockpile: Record<string, number>;
+  /** Discoveries this civilization has made. */
+  discoveries: string[];
   nav: NavGrid;
   villagers: Villager[];
   rng: Rng;
@@ -100,6 +102,7 @@ export function createWorld(seed: number): World {
     nodes: buildNodes(seed, scene.props),
     // A small starting store so the band is not starving on day one.
     stockpile: { berries: 10, 'dried-meat': 4, hardwood: 6, stone: 4, flint: 2 },
+    discoveries: [],
     nav: new NavGrid(scene.terrain),
     villagers,
     rng,
