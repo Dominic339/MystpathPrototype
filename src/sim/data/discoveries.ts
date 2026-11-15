@@ -67,6 +67,7 @@ export const DISCOVERIES: readonly Discovery[] = [
   d('mining', 'Mining', 'iron', ['quarrying'], ['quarrying', 'cut-stone'], 'Shafts and tunnels into ore veins: adit mines.'),
   d('iron-smelting', 'Iron smelting', 'iron', ['mining', 'pottery'], ['mining', 'fire-pottery'], 'Smelting ore with charcoal in a clay bloomery.'),
   d('charcoal-burning', 'Charcoal burning', 'iron', ['pottery'], ['fire-pottery', 'cut-softwood'], 'Slow-burning wood under turf into charcoal for hotter fires.'),
+  d('blacksmithing', 'Blacksmithing', 'iron', ['iron-smelting'], ['bloom-iron', 'smelt-copper'], 'Hammering iron into tools, weapons, nails and pots at a smithy.'),
   d('timber-framing', 'Timber framing', 'iron', ['woodworking'], ['cut-softwood', 'cut-hardwood'], 'Jointed timber frames: longhouses, cranes and bridges.'),
   d('ploughing', 'Ploughing', 'iron', ['agriculture', 'iron-smelting'], ['grain-farming'], 'An iron-shod plough turns far more ground.'),
   d('milling', 'Milling', 'iron', ['agriculture'], ['grain-farming', 'bake-flatbread'], 'Grinding grain into flour: quern houses and bakehouses.'),
@@ -105,6 +106,7 @@ export const DISCOVERIES: readonly Discovery[] = [
 
   // ======================================================== Renaissance
   d('brickwork', 'Brickwork', 'renaissance', ['masonry'], ['fire-bricks'], 'Fired brick buildings with glazed windows: townhouses.'),
+  d('printing', 'Printing', 'renaissance', ['water-mills'], ['bind-books', 'make-paper'], 'Movable type: books for everyone, from a printing house.'),
   d('gunpowder', 'Gunpowder', 'renaissance', [], ['mill-gunpowder', 'burn-charcoal'], 'Saltpetre, sulphur and charcoal.', ['saltpeter', 'sulfur']),
   d('grow-houses', 'Grow houses', 'renaissance', ['herb-gardening', 'glassmaking'], ['herb-growing'], 'Glass houses that grow herbs, spices and seedlings year-round.'),
   d('airship', 'Airship', 'renaissance', ['levitation', 'sailing'], ['cut-levitation-core', 'weave-canvas'], 'A canvas envelope carried aloft by levitation cores: airship yards and mooring masts.'),

@@ -1,3 +1,4 @@
+import { EXPECTED_QUALITY, GOOD_BY_ID, GOOD_CATEGORIES } from './data/goods';
 // The simulation runs here, off the main thread, so heavy simulation never stalls rendering.
 
 import { speciesIndex } from './animals';
@@ -15,7 +16,7 @@ import { ACTIVITY_CODES, HERD_STRIDE, VILLAGER_STRIDE, VOYAGE_STRIDE, type FromS
 import { saveWorld } from './save';
 import { carryCategory, foodTotal, level } from './villagerAI';
 import { activeStorage } from './food';
-import { housingCapacity, lineOf, roadName, tierOf, underConstruction } from './town';
+import { bestGoods, housingCapacity, lineOf, roadName, tierOf, underConstruction } from './town';
 import { PRODUCTS as ITEM_NAMES } from './data/processing';
 import type { StructureView } from './protocol';
 import { calendar } from './time';
@@ -107,6 +108,11 @@ function stats(w: World): Stats {
     roads: roadName(w),
     storage: activeStorage(w).map((s) => s.name),
     spoiledYesterday: w.spoilage.yesterday,
+    goods: GOOD_CATEGORIES.map((c) => {
+      const best = bestGoods(w)[c];
+      const l = w.living[c];
+      return { category: c, name: best.id ? GOOD_BY_ID.get(best.id)!.name : null, coverage: l?.coverage ?? 0, quality: l?.quality ?? 0, expected: EXPECTED_QUALITY[currentEra(w)] };
+    }),
   };
 }
 
@@ -307,7 +313,7 @@ setInterval(() => {
   if (w.structuresVersion !== sentStructures || (building && now - lastStructurePost > 2000)) {
     sentStructures = w.structuresVersion;
     lastStructurePost = now;
-    post({ type: 'structures', list: structureViews(w) });
+    post({ type: 'structures', list: structureViews(w), cleared: w.cleared });
   }
   if (now - lastStats > 1000) {
     lastStats = now;

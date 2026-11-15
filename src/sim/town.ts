@@ -7,6 +7,7 @@
 // Newcomers join a prosperous band with room to sleep, and roads grow out of busy footpaths.
 
 import { ACQUISITION } from './data/acquisition';
+import { BASIC_NEEDS, EXPECTED_QUALITY, GOOD_CATEGORIES, GOODS, type GoodCategory } from './data/goods';
 import { eraIndex } from './data/eras';
 import { FAUNA_BY_ID } from './data/fauna';
 import { PASSION_JOBS, PASSIONS } from './data/jobs';
@@ -27,7 +28,7 @@ export function obtainable(world: World, id: string, need = 1): boolean {
   return RECIPES.some((r) => r.outputs[id] && can(r.facility) && (r.requires ?? []).every((d) => knows(world, d)));
 }
 
-function canSupply(world: World, t: Tier): boolean {
+export function canSupply(world: World, t: Tier): boolean {
   return Object.entries(t.build).every(([id, q]) => obtainable(world, id, q));
 }
 
@@ -159,7 +160,7 @@ function siteScore(world: World, site: Site, hexIndex: number): number {
   }
 }
 
-function clearAt(world: World, x: number, z: number, r: number, ignore?: Structure): boolean {
+function clearAt(world: World, x: number, z: number, r: number, ignore?: Structure, near: World['props'] = world.props): boolean {
   const t = world.terrain;
   if (t.slope(x, z) > 0.45 || t.sample(x, z) < t.waterLevel + 0.3) return false;
   for (const s of world.structures) {
@@ -169,12 +170,34 @@ function clearAt(world: World, x: number, z: number, r: number, ignore?: Structu
   }
   const c = world.camp;
   if (Math.hypot(c.fire.x - x, c.fire.z - z) < 8 + r) return false;
-  for (const p of world.props) {
-    if (p.kind === 'flowers' || p.kind === 'grain' || p.kind === 'tubers' || p.kind === 'flax' || p.kind === 'mushrooms' || p.kind === 'nest') continue;
-    const pr = p.kind === 'oak' || p.kind === 'pine' || p.kind === 'birch' || p.kind === 'apple' ? 1.8 : p.kind === 'boulder' ? 2.2 : 1;
-    if (Math.hypot(p.x - x, p.z - z) < r + pr) return false;
+  // Brush and trees can be cleared; boulders, spirit trees and hives cannot. Clearing
+  // costs a little, so cleaner ground is preferred.
+  for (const p of near) {
+    if (!BLOCKING.has(p.kind)) continue;
+    if (Math.hypot(p.x - x, p.z - z) < r + (p.kind === 'boulder' ? 2.2 : 1.8)) return false;
   }
   return true;
+}
+
+const BLOCKING = new Set(['boulder', 'spirit', 'beehive']);
+const KEEP = new Set(['flowers', 'grain', 'tubers', 'flax', 'mushrooms', 'nest', 'reeds', 'seaweed', 'shellfish']);
+const TIMBER: Partial<Record<string, [string, number]>> = { oak: ['hardwood', 6], apple: ['hardwood', 3], birch: ['hardwood', 4], tropical: ['hardwood', 5], pine: ['softwood', 6], bamboo: ['softwood', 2], hazel: ['softwood', 1] };
+
+/** Clear brush and fell trees where a building will stand; the timber goes to the stockpile. */
+function clearSite(world: World, x: number, z: number, r: number): void {
+  const nodeOf = new Map(world.nodes.map((n) => [n.prop, n]));
+  world.props.forEach((p, i) => {
+    if (KEEP.has(p.kind) || BLOCKING.has(p.kind) || world.cleared.includes(i)) return;
+    if (Math.abs(p.x - x) > r + 2 || Math.abs(p.z - z) > r + 2 || Math.hypot(p.x - x, p.z - z) > r + 1.8) return;
+    world.cleared.push(i);
+    const wood = TIMBER[p.kind];
+    if (wood) world.stockpile[wood[0]] = (world.stockpile[wood[0]] ?? 0) + wood[1];
+    const n = nodeOf.get(i);
+    if (n) {
+      n.stock = {};
+      n.max = {};
+    }
+  });
 }
 
 /** Find a spot for a building of this line: the best-suited hex nearest the town centre. */
@@ -193,13 +216,18 @@ export function findSite(world: World, l: Line, model: string): { x: number; z: 
     ranked.push({ i, score: s / (1 + d / (l.site === 'camp' ? 15 : 40)) });
   }
   ranked.sort((a, b) => b.score - a.score);
-  for (const { i } of ranked.slice(0, 14)) {
+  let tried = 0;
+  for (const { i } of ranked) {
     const c = hexToWorld(world.hexes[i]);
     const key = hexKey(world.hexes[i]);
     // One large building per hex; homes can cluster three to a hex.
     const here = world.structures.filter((s) => s.hex === key);
     if (l.kind === 'housing' ? here.some((s) => lineOf(s).kind !== 'housing') || here.length >= 3 : here.length > 0) continue;
-    for (let k = 0; k < 24; k++) {
+    if (++tried > 40) break;
+    // Only the plants and rocks around this hex can be in the way.
+    const reach = HEX_SIZE * 1.4 + r + 16;
+    const near = world.props.filter((p) => Math.abs(p.x - c.x) < reach && Math.abs(p.z - c.z) < reach);
+    for (let k = 0; k < 14; k++) {
       const a = world.rng.next() * Math.PI * 2;
       const rad = Math.sqrt(world.rng.next()) * HEX_SIZE * 0.75;
       let x = c.x + Math.cos(a) * rad;
@@ -211,9 +239,9 @@ export function findSite(world: World, l: Line, model: string): { x: number; z: 
         x = edge.x;
         z = edge.z;
       }
-      if (!clearAt(world, x, z, r)) continue;
+      if (!clearAt(world, x, z, r, undefined, near)) continue;
       // Villagers must be able to walk there from the town.
-      if (walkCost(world, x, z) > 110) continue;
+      if (walkCost(world, x, z) > 150) continue;
       // Face the town centre (or the water, for waterside buildings).
       const face = l.site === 'water' ? waterDirection(world, x, z) : Math.atan2(camp.x - x, camp.z - z);
       return { x, z, rot: face, hex: key };
@@ -340,8 +368,7 @@ export function planTown(world: World, needs: Record<string, number>, dt: number
 
   // 3. New buildings: the most useful line the town has none of yet, or another of a
   //    busy one when more people want that work than it has places for.
-  let pick: Line | null = null;
-  let pickScore = 0;
+  const picks: { l: Line; u: number }[] = [];
   for (const l of LINES) {
     if (l.kind === 'housing') continue;
     if (bestTier(world, l) < 0 || !canSupply(world, l.tiers[0])) continue;
@@ -357,15 +384,14 @@ export function planTown(world: World, needs: Record<string, number>, dt: number
       if (keen + (wanted ? 2 : 0) <= places) continue;
       u = 0.45 + Math.min(0.3, (keen - places) * 0.1);
     }
-    if (u > pickScore) {
-      pickScore = u;
-      pick = l;
-    }
+    if (u > 0) picks.push({ l, u });
   }
-  if (pick) {
+  // The most useful first; if there is nowhere to put it, the next.
+  picks.sort((a, b) => b.u - a.u);
+  for (const { l } of picks.slice(0, 4)) {
     // A second building of a line starts at the best tier the town knows.
-    const tier = world.structures.some((s) => s.line === pick!.id) ? Math.max(0, bestTier(world, pick)) : 0;
-    place(world, pick, tier);
+    const tier = world.structures.some((s) => s.line === l.id) ? Math.max(0, bestTier(world, l)) : 0;
+    if (place(world, l, tier)) break;
   }
 }
 
@@ -374,6 +400,7 @@ function place(world: World, l: Line, tier: number): boolean {
   const site = findSite(world, l, model);
   if (!site) return false;
   // A new building goes up at the first tier, then upgrades.
+  clearSite(world, site.x, site.z, footprint(model));
   const s: Structure = {
     id: world.nextStructureId++, line: l.id, tier: -1, target: tier, progress: 0, supplied: false,
     x: site.x, z: site.z, rot: site.rot, hex: site.hex, variant: Math.floor(world.rng.next() * 4), owner: chooseOwner(world, l), animals: 0,
@@ -448,6 +475,7 @@ export function dailyTown(world: World, food: number): void {
   world.walkField = world.nav.distanceField(world.camp.center.x, world.camp.center.z);
   for (const s of world.structures) if (s.animals > 0 && s.animals < 12) s.animals += 1;
   homeLife(world);
+  goodsLife(world);
   const people = world.villagers.length;
   const happy = world.villagers.reduce((a, v) => a + v.fulfilment, 0) / Math.max(1, people);
   const room = housingCapacity(world) - people;
@@ -544,6 +572,58 @@ function homeLife(world: World): void {
     world.rosterVersion++;
     logEvent(world, `${v.name}, unhappy here, left the band to seek a better life.`);
   }
+}
+
+/** The best good of each category the town has (and how well it covers everyone). */
+export function bestGoods(world: World): Record<GoodCategory, { id: string | null; quality: number; coverage: number }> {
+  const out = {} as Record<GoodCategory, { id: string | null; quality: number; coverage: number }>;
+  for (const c of GOOD_CATEGORIES) out[c] = { id: null, quality: 0, coverage: 0 };
+  for (const g of GOODS) {
+    if ((world.stockpile[g.id] ?? 0) < 1) continue;
+    if (g.quality > out[g.category].quality) out[g.category] = { id: g.id, quality: g.quality, coverage: world.living[g.category]?.coverage ?? 1 };
+  }
+  return out;
+}
+
+/**
+ * Daily: everyone uses the best goods the town has, which slowly wear out and are used
+ * up. Goods better than the age expects make people glad; missing basics (clothing, tools,
+ * household wares, medicine) make them grumble once the band has left the wild behind.
+ */
+function goodsLife(world: World): void {
+  const people = world.villagers.length;
+  const era = currentEra(world);
+  const expected = EXPECTED_QUALITY[era];
+  let mood = 0;
+  for (const c of GOOD_CATEGORIES) {
+    const options = GOODS.filter((g) => g.category === c && (world.stockpile[g.id] ?? 0) > 0).sort((a, b) => b.quality - a.quality);
+    let wanted = people;
+    let quality = 0;
+    let covered = 0;
+    // Use the best first; if it runs short, the next best fills in.
+    for (const g of options) {
+      if (wanted <= 0) break;
+      const perPerson = 1 / g.lifetimeDays;
+      const have = world.stockpile[g.id];
+      const users = Math.min(wanted, have / perPerson);
+      world.stockpile[g.id] = Math.max(0, have - users * perPerson);
+      quality += g.quality * users;
+      covered += users;
+      wanted -= users;
+    }
+    const coverage = people ? covered / people : 0;
+    const avgQuality = covered ? quality / covered : 0;
+    world.living[c] = { coverage, quality: avgQuality };
+    if (covered) mood += (avgQuality - expected) * 0.06 * coverage;
+    if (BASIC_NEEDS.includes(c) && era !== 'hunter-gatherer') mood -= 0.03 * (1 - coverage);
+  }
+  for (const v of world.villagers) v.fulfilment = Math.max(0, Math.min(1, v.fulfilment + mood));
+}
+
+/** How much faster good tools make work, how much better weapons make hunting, how much more carts carry. */
+export function toolBonus(world: World): { work: number; hunt: number; carry: number } {
+  const best = bestGoods(world);
+  return { work: 1 + best.tools.quality * 0.3, hunt: 1 + best.weapons.quality * 0.5, carry: Math.round(best.transport.quality * 6) };
 }
 
 /** The camp's tents become the town's first homes. */

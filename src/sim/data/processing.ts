@@ -37,7 +37,15 @@ export const PRODUCTS: Readonly<Record<string, string>> = {
   'carved-jade': 'Carved jade', 'amber-beads': 'Amber beads', leather: 'Leather', pelts: 'Pelts', linen: 'Linen', 'cotton-cloth': 'Cotton cloth', 'wool-cloth': 'Woollen cloth',
   canvas: 'Canvas', baskets: 'Baskets and mats', rope: 'Rope', dye: 'Dye', medicine: 'Medicine', candles: 'Candles and soap', 'wax-and-honey': 'Beeswax and honey',
   'meat-cuts': 'Meat cuts', 'smoked-fish': 'Smoked fish', 'smoked-meat': 'Smoked meat', flour: 'Flour', bread: 'Bread', preserves: 'Preserves', 'spice-blend': 'Spice blend',
-  'egg-dishes': 'Egg dishes', cheese: 'Cheese', 'salted-meat': 'Salted meat', 'salted-fish': 'Salted fish', pickles: 'Pickles', 'canned-food': 'Canned food', 'dugout-canoe': 'Dugout canoe', 'plank-boat': 'Plank boat', 'sailing-ship': 'Sailing ship', steamship: 'Steamship', airship: 'Airship', 'motor-airship': 'Motor airship', 'roast-poultry': 'Roast poultry', 'mana-cell': 'Mana cell', 'heat-core': 'Heat core', 'cold-core': 'Cold core', 'levitation-core': 'Levitation core', 'spirit-focus': 'Spirit focus',
+  'egg-dishes': 'Egg dishes', cheese: 'Cheese', 'salted-meat': 'Salted meat', 'salted-fish': 'Salted fish', pickles: 'Pickles', 'canned-food': 'Canned food', 'dugout-canoe': 'Dugout canoe',
+  'hide-clothing': 'Hide clothing', 'fur-cloak': 'Fur cloak', 'woven-clothing': 'Woven clothing', 'fine-clothing': 'Fine dyed clothing', 'factory-clothing': 'Factory-made clothing',
+  'synthetic-clothing': 'Synthetic clothing', 'enchanted-garments': 'Enchanted garments', moccasins: 'Moccasins', boots: 'Hobnailed boots', 'factory-shoes': 'Factory shoes',
+  'iron-tools': 'Iron tools', 'steel-tools': 'Steel tools', 'power-tools': 'Power tools', 'mana-tools': 'Mana-charged tools', 'simple-furniture': 'Simple furniture',
+  'fine-furniture': 'Fine furniture', 'upholstered-furniture': 'Upholstered furniture', 'modern-furniture': 'Modern furniture', 'oil-lamps': 'Oil lamps', 'electric-lights': 'Electric lights',
+  'mana-lamps': 'Mana lamps', glassware: 'Glassware', metalware: 'Pots, pans and cutlery', soap: 'Soap', pharmaceuticals: 'Pharmaceuticals', drums: 'Drums', mead: 'Mead', beer: 'Beer',
+  wine: 'Wine', jewellery: 'Jewellery', paper: 'Paper', books: 'Books', lutes: 'Lutes', 'printed-books': 'Printed books', pianos: 'Pianos', radios: 'Radios', spears: 'Spears',
+  bows: 'Bows and arrows', 'iron-weapons': 'Iron weapons', muskets: 'Muskets', rifles: 'Rifles', carts: 'Carts', wagons: 'Wagons', locomotives: 'Locomotives', automobiles: 'Automobiles',
+  'hover-carriages': 'Hover carriages', 'machine-parts': 'Machine parts', 'steam-engine': 'Steam engine', 'electric-motor': 'Electric motor', electronics: 'Electronics', 'plank-boat': 'Plank boat', 'sailing-ship': 'Sailing ship', steamship: 'Steamship', airship: 'Airship', 'motor-airship': 'Motor airship', 'roast-poultry': 'Roast poultry', 'mana-cell': 'Mana cell', 'heat-core': 'Heat core', 'cold-core': 'Cold core', 'levitation-core': 'Levitation core', 'spirit-focus': 'Spirit focus',
 };
 
 const r = (id: string, name: string, facility: string, era: EraId, inputs: Record<string, number>, outputs: Record<string, number>, seconds = 60, requires?: string[]): Recipe => ({ id, name, facility, era, inputs, outputs, seconds, requires });
@@ -194,6 +202,68 @@ export const RECIPES: readonly Recipe[] = [
   r('blend-spices', 'Blend spices', 'kitchen', 'iron', { spices: 2 }, { 'spice-blend': 1 }, 60),
 
   // Magic
+  // ---------------------------------------------------------------- Final goods
+  // Clothing and footwear
+  r('sew-hide-clothing', 'Sew hide clothing', 'drying-rack', 'hunter-gatherer', { 'cured-hide': 2, sinew: 1 }, { 'hide-clothing': 1 }, 120),
+  r('sew-fur-cloak', 'Sew a fur cloak', 'drying-rack', 'hunter-gatherer', { fur: 2, sinew: 1 }, { 'fur-cloak': 1 }, 120),
+  r('tailor-linen', 'Tailor linen clothing', 'weaver', 'stone', { linen: 2 }, { 'woven-clothing': 1 }, 120),
+  r('tailor-wool', 'Tailor wool clothing', 'weaver', 'stone', { 'wool-cloth': 2 }, { 'woven-clothing': 1 }, 120),
+  r('tailor-fine', 'Tailor fine dyed clothing', 'weaver', 'medieval', { 'wool-cloth': 2, dye: 1, linen: 1 }, { 'fine-clothing': 1 }, 180),
+  r('sew-factory-clothing', 'Sew factory clothing', 'manufactory', 'industrial', { 'cotton-cloth': 3 }, { 'factory-clothing': 4 }, 120, ['factory-system']),
+  r('make-synthetic-clothing', 'Make synthetic clothing', 'assembly-plant', 'modern', { plastics: 2, 'cotton-cloth': 1 }, { 'synthetic-clothing': 4 }, 120, ['assembly-lines']),
+  r('weave-enchanted-garments', 'Weave enchanted garments', 'fabricator', 'techno-magic', { 'wool-cloth': 2, 'mana-cell': 1 }, { 'enchanted-garments': 2 }, 180, ['arcane-engineering']),
+  r('make-moccasins', 'Make moccasins', 'tannery', 'stone', { leather: 1 }, { moccasins: 1 }, 90),
+  r('make-boots', 'Make hobnailed boots', 'tannery', 'iron', { leather: 2, 'iron-ingot': 1 }, { boots: 2 }, 150, ['blacksmithing']),
+  r('make-factory-shoes', 'Make factory shoes', 'manufactory', 'industrial', { leather: 2, rubber: 1 }, { 'factory-shoes': 4 }, 120, ['factory-system']),
+  // Tools
+  r('forge-iron-tools', 'Forge iron tools', 'smithy', 'iron', { 'iron-ingot': 2, lumber: 1 }, { 'iron-tools': 2 }, 150, ['blacksmithing']),
+  r('make-steel-tools', 'Make steel tools', 'machine-shop', 'industrial', { 'iron-ingot': 3, coke: 1, lumber: 1 }, { 'steel-tools': 3 }, 150, ['steel']),
+  r('make-power-tools', 'Make power tools', 'assembly-plant', 'modern', { 'electric-motor': 1, 'steel-tools': 1, plastics: 1 }, { 'power-tools': 2 }, 150, ['electricity']),
+  r('charge-mana-tools', 'Charge mana tools', 'fabricator', 'techno-magic', { 'steel-tools': 1, 'mana-cell': 1 }, { 'mana-tools': 1 }, 120, ['arcane-engineering']),
+  // Home
+  r('make-simple-furniture', 'Make simple furniture', 'workshop', 'stone', { lumber: 3, cordage: 1 }, { 'simple-furniture': 1 }, 150, ['woodworking']),
+  r('make-fine-furniture', 'Make fine furniture', 'workshop', 'medieval', { 'hardwood-planks': 3, 'resin-glue': 1 }, { 'fine-furniture': 1 }, 200),
+  r('make-upholstered-furniture', 'Make upholstered furniture', 'manufactory', 'industrial', { planks: 3, 'cotton-cloth': 2, 'iron-ingot': 1 }, { 'upholstered-furniture': 2 }, 180, ['factory-system']),
+  r('make-modern-furniture', 'Make modern furniture', 'assembly-plant', 'modern', { plastics: 2, aluminium: 1 }, { 'modern-furniture': 3 }, 150, ['assembly-lines']),
+  r('make-oil-lamps', 'Make oil lamps', 'smithy', 'renaissance', { 'copper-ingot': 1, glass: 1 }, { 'oil-lamps': 2 }, 120),
+  r('make-electric-lights', 'Make electric lights', 'assembly-plant', 'modern', { glass: 1, 'copper-ingot': 1, tungsten: 1 }, { 'electric-lights': 4 }, 120, ['electricity']),
+  r('make-mana-lamps', 'Make mana lamps', 'fabricator', 'techno-magic', { glass: 1, 'mana-cell': 1 }, { 'mana-lamps': 4 }, 120, ['arcane-engineering']),
+  r('blow-glassware', 'Blow glassware', 'glassworks', 'iron', { glass: 2 }, { glassware: 2 }, 90),
+  r('make-metalware', 'Make pots, pans and cutlery', 'smithy', 'iron', { 'iron-ingot': 1 }, { metalware: 2 }, 120, ['blacksmithing']),
+  // Health
+  r('make-soap', 'Make soap', 'chandlery', 'iron', { 'animal-fat': 2, potash: 1 }, { soap: 3 }, 90),
+  r('make-pharmaceuticals', 'Make pharmaceuticals', 'chemical-works', 'modern', { herbs: 2, 'sulfuric-acid': 1 }, { pharmaceuticals: 4 }, 150, ['electricity']),
+  // Leisure and luxury
+  r('make-drums', 'Make drums', 'drying-rack', 'hunter-gatherer', { 'cured-hide': 1, softwood: 1 }, { drums: 1 }, 120),
+  r('brew-mead', 'Brew mead', 'kitchen', 'iron', { honey: 2, 'fresh-water': 1 }, { mead: 2 }, 120, ['fermenting']),
+  r('brew-beer', 'Brew beer', 'kitchen', 'iron', { 'wild-grain': 3, 'fresh-water': 2 }, { beer: 3 }, 120, ['fermenting']),
+  r('press-wine', 'Press wine', 'kitchen', 'iron', { 'wild-fruit': 4 }, { wine: 2 }, 150, ['fermenting']),
+  r('make-gold-jewellery', 'Make gold jewellery', 'gem-cutter', 'iron', { 'gold-ingot': 1, 'cut-ruby': 1 }, { jewellery: 2 }, 200),
+  r('make-silver-jewellery', 'Make silver jewellery', 'gem-cutter', 'iron', { 'silver-ingot': 1, 'amber-beads': 2 }, { jewellery: 2 }, 200),
+  r('make-paper', 'Make paper', 'mill', 'medieval', { softwood: 2, 'fresh-water': 2 }, { paper: 4 }, 120, ['water-mills']),
+  r('bind-books', 'Bind books', 'workshop', 'medieval', { paper: 4, leather: 1 }, { books: 1 }, 200),
+  r('make-lutes', 'Make lutes', 'workshop', 'medieval', { 'hardwood-planks': 1, sinew: 1 }, { lutes: 1 }, 200),
+  r('print-books', 'Print books', 'printing-press', 'renaissance', { paper: 6, leather: 1, dye: 1 }, { 'printed-books': 4 }, 150, ['printing']),
+  r('build-piano', 'Build a piano', 'manufactory', 'industrial', { 'hardwood-planks': 4, 'iron-ingot': 2 }, { pianos: 1 }, 300, ['factory-system']),
+  r('make-radios', 'Make radios', 'assembly-plant', 'modern', { electronics: 1, plastics: 1 }, { radios: 2 }, 150, ['electricity']),
+  // Weapons
+  r('make-spears', 'Make spears', 'knapping-spot', 'hunter-gatherer', { softwood: 1, flint: 1, sinew: 1 }, { spears: 2 }, 90),
+  r('make-bows', 'Make bows and arrows', 'workshop', 'stone', { softwood: 1, sinew: 2, fletching: 1 }, { bows: 1 }, 150),
+  r('forge-iron-weapons', 'Forge iron weapons', 'smithy', 'iron', { 'iron-ingot': 2, lumber: 1 }, { 'iron-weapons': 1 }, 180, ['blacksmithing']),
+  r('make-muskets', 'Make muskets', 'smithy', 'renaissance', { 'iron-ingot': 2, 'hardwood-planks': 1, gunpowder: 1 }, { muskets: 1 }, 240, ['gunpowder']),
+  r('make-rifles', 'Make rifles', 'machine-shop', 'industrial', { 'iron-ingot': 3, 'hardwood-planks': 1 }, { rifles: 2 }, 200, ['steel']),
+  // Transport
+  r('build-cart', 'Build a cart', 'workshop', 'iron', { lumber: 4, 'iron-ingot': 1 }, { carts: 1 }, 240, ['timber-framing']),
+  r('build-wagon', 'Build a wagon', 'workshop', 'medieval', { planks: 6, 'iron-ingot': 2 }, { wagons: 1 }, 300),
+  r('build-locomotive', 'Build a locomotive', 'machine-shop', 'industrial', { 'iron-ingot': 20, 'steam-engine': 1 }, { locomotives: 1 }, 1200, ['railways']),
+  r('build-automobile', 'Build an automobile', 'assembly-plant', 'modern', { 'machine-parts': 4, rubber: 2, glass: 2, 'electric-motor': 1 }, { automobiles: 1 }, 600, ['assembly-lines']),
+  r('build-hover-carriage', 'Build a hover carriage', 'fabricator', 'techno-magic', { 'levitation-core': 2, aluminium: 4, 'mana-cell': 1 }, { 'hover-carriages': 1 }, 600, ['arcane-engineering']),
+  // Machines: the parts the modern goods are made from
+  r('make-machine-parts', 'Make machine parts', 'machine-shop', 'industrial', { 'iron-ingot': 3 }, { 'machine-parts': 2 }, 150, ['steam-pumps']),
+  r('build-steam-engine', 'Build a steam engine', 'machine-shop', 'industrial', { 'machine-parts': 3, 'copper-ingot': 1 }, { 'steam-engine': 1 }, 300, ['steam-pumps']),
+  r('wind-electric-motor', 'Wind an electric motor', 'assembly-plant', 'modern', { 'copper-ingot': 3, 'iron-ingot': 2, insulators: 1 }, { 'electric-motor': 1 }, 200, ['electricity']),
+  r('make-electronics', 'Make electronics', 'assembly-plant', 'modern', { 'copper-ingot': 1, 'fine-glass': 1, plastics: 1, 'rare-earth-metals': 1 }, { electronics: 2 }, 200, ['electricity']),
+
   // Vehicles: canoes to airships.
   r('carve-canoe', 'Carve a dugout canoe', 'canoe-yard', 'stone', { hardwood: 8, resin: 2, 'stone-tools': 1 }, { 'dugout-canoe': 1 }, 600, ['dugout-canoe']),
   r('build-plank-boat', 'Build a plank boat', 'boatwright', 'iron', { lumber: 12, pitch: 3, rope: 2 }, { 'plank-boat': 1 }, 900, ['plank-boats']),

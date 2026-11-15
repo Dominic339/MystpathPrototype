@@ -668,15 +668,38 @@ function buildKind(kind: PropKind, v: number): BuiltKind {
 }
 
 /** Build InstancedMeshes per kind × variant (wood and foliage separately), placed on the terrain. */
-export function buildVegetation(props: PropInstance[], terrain: Heightfield): THREE.Group {
-  const group = new THREE.Group();
+export type Vegetation = THREE.Group & { hide(indices: readonly number[]): void };
+
+export function buildVegetation(props: PropInstance[], terrain: Heightfield): Vegetation {
+  const group = new THREE.Group() as Vegetation;
+  // Where each prop is drawn, so cleared ones can be hidden.
+  const slots = new Map<number, { meshes: THREE.InstancedMesh[]; slot: number }>();
+  const hiddenSet = new Set<number>();
+  const zero = new THREE.Matrix4().makeScale(0, 0, 0);
+  group.hide = (indices) => {
+    for (const i of indices) {
+      if (hiddenSet.has(i)) continue;
+      const at = slots.get(i);
+      if (!at) continue;
+      hiddenSet.add(i);
+      for (const mesh of at.meshes) {
+        mesh.setMatrixAt(at.slot, zero);
+        mesh.instanceMatrix.needsUpdate = true;
+      }
+    }
+  };
   group.name = 'vegetation';
   const buckets = new Map<string, PropInstance[]>();
+  const bucketIndex = new Map<string, number[]>();
   props.forEach((p, i) => {
     const v = Math.floor(hash01(77, i) * VARIANTS);
     const key = `${p.kind}:${v}`;
-    if (!buckets.has(key)) buckets.set(key, []);
+    if (!buckets.has(key)) {
+      buckets.set(key, []);
+      bucketIndex.set(key, []);
+    }
     buckets.get(key)!.push(p);
+    bucketIndex.get(key)!.push(i);
   });
   const m = new THREE.Matrix4();
   const q = new THREE.Quaternion();
@@ -707,6 +730,8 @@ export function buildVegetation(props: PropInstance[], terrain: Heightfield): TH
       mesh.userData.noAO = true;
       meshes.push(mesh);
     }
+    const ids = bucketIndex.get(key)!;
+    list.forEach((_, slot) => slots.set(ids[slot], { meshes, slot }));
     list.forEach((p, i) => {
       // Sink slightly so bases never float on slopes.
       const y = terrain.sample(p.x, p.z) - (kind === 'boulder' ? 0.6 : kind === 'shellfish' ? 0.15 : 0.05);

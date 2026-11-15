@@ -7,7 +7,7 @@ import type { World } from './world';
 import { buildWorld } from './worldgen';
 import { NavGrid } from './pathfinding';
 
-export const SAVE_VERSION = 7;
+export const SAVE_VERSION = 8;
 
 export interface SaveFile {
   version: number;
@@ -26,6 +26,8 @@ export interface SaveFile {
   seen: World['seen'];
   built: World['built'];
   structures: World['structures'];
+  living: World['living'];
+  cleared: number[];
   voyages: World['voyages'];
   town: { nextStructureId: number; planTimer: number; lastTownDay: number; roadTimer: number };
   roads: string;
@@ -58,6 +60,8 @@ export function saveWorld(world: World): SaveFile {
     seen: world.seen,
     built: world.built,
     structures: world.structures,
+    living: world.living,
+    cleared: world.cleared,
     voyages: world.voyages,
     town: { nextStructureId: world.nextStructureId, planTimer: world.planTimer, lastTownDay: world.lastTownDay, roadTimer: world.roadTimer },
     roads: btoa(String.fromCharCode(...world.nav.road)),
@@ -100,6 +104,8 @@ export function loadWorld(save: SaveFile): World {
     seen: [...save.seen],
     built: [...save.built],
     structures: clone(save.structures),
+    living: clone(save.living ?? {}),
+    cleared: [...(save.cleared ?? [])],
     ...save.town,
     structuresVersion: 1,
     slowTimer: 0,

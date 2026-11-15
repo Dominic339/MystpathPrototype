@@ -17,7 +17,8 @@ import { itemName, RECIPES, type Recipe } from './data/processing';
 import { FACILITY_BY_ID } from './data/facilities';
 import { currentEra, gainInsight, knows, logEvent, noteSeen, workable } from './discovery';
 import { ROAD_TIERS } from './data/structures';
-import { bedFor, buildingWants, buildWork, lineOf, providedFacilities, tierOf, underConstruction, type Structure } from './town';
+import { bedFor, buildingWants, buildWork, lineOf, providedFacilities, tierOf, toolBonus, underConstruction, type Structure } from './town';
+import { GOOD_BY_ID, GOOD_CATEGORIES, GOODS } from './data/goods';
 import { hexToWorld } from './hex';
 import { CYCLE_SECONDS, SEASONS } from './time';
 import { calendar } from './time';
@@ -224,7 +225,17 @@ function need(have: number, want: number): number {
 }
 
 /** How much each material is wanted right now (0..1). */
+let needsCache: { world: World; at: number; n: Record<string, number> } | null = null;
+/** What the band needs, recomputed at most once a game second. */
 export function materialNeeds(world: World): Record<string, number> {
+  const now = world.clock.totalSeconds;
+  if (needsCache && needsCache.world === world && now - needsCache.at < 1 && now >= needsCache.at) return needsCache.n;
+  const n = computeNeeds(world);
+  needsCache = { world, at: now, n };
+  return n;
+}
+
+function computeNeeds(world: World): Record<string, number> {
   const t = targets(world.villagers.length);
   const food = need(foodTotal(world), t.food);
   const wood = need(stock(world, 'hardwood') + stock(world, 'softwood'), t.wood);
@@ -237,6 +248,26 @@ export function materialNeeds(world: World): Record<string, number> {
   n.bone = need(stock(world, 'bone'), 4);
   n.sinew = need(stock(world, 'sinew'), 4);
   n.feathers = need(stock(world, 'feathers') + stock(world, 'fletching') * 3, 6);
+  // Goods: for each kind, the best the town can make is wanted, enough for a third of the
+  // band at a time; what goes into it is wanted too (one step back along the chain).
+  const provided = providedFacilities(world);
+  const recipes = availableRecipes(world, provided);
+  const people = world.villagers.length;
+  for (const c of GOOD_CATEGORIES) {
+    const makeable = GOODS.filter((g) => g.category === c && recipes.some((r) => r.outputs[g.id])).sort((a, b) => b.quality - a.quality);
+    // The best is wanted most; when people are going without, the next best too, so a
+    // missing link in the best chain never leaves everyone without.
+    const short = (world.living[c]?.coverage ?? 1) < 0.95;
+    makeable.slice(0, short ? 3 : 1).forEach((g, rank) => {
+      // Going without makes the want sharper.
+      const lack = 1 - (world.living[c]?.coverage ?? 1);
+      const want = Math.min(1, need(stock(world, g.id), Math.max(2, Math.ceil(people / 4))) * (rank === 0 ? 1 : 0.8) * (0.8 + lack * 0.6));
+      if (want <= 0) return;
+      n[g.id] = Math.max(n[g.id] ?? 0, want);
+      const r = recipes.find((x) => x.outputs[g.id])!;
+      for (const [id, q] of Object.entries(r.inputs)) if (stock(world, id) < q * 3) n[id] = Math.max(n[id] ?? 0, want * 0.8);
+    });
+  }
   // Building sites waiting for materials pull them in.
   for (const [id, missing] of Object.entries(buildingWants(world))) n[id] = Math.max(n[id] ?? 0, Math.min(1, 0.5 + missing / 20));
   return n;
@@ -248,12 +279,17 @@ function methodNeed(m: AcquisitionMethod, needs: Record<string, number>): number
   return best;
 }
 
-function recipeNeed(world: World, r: Recipe, wants: Record<string, number>): number {
+function recipeNeed(world: World, r: Recipe, wants: Record<string, number>, needs: Record<string, number>): number {
   for (const [id, q] of Object.entries(r.inputs)) if (stock(world, id) < q) return 0;
   const people = world.villagers.length;
+  // Goods: once there is enough for everyone, stop.
+  for (const id of Object.keys(r.outputs)) if (GOOD_BY_ID.has(id) && stock(world, id) >= Math.max(4, people * 0.6)) return 0;
   const t = targets(people);
   let best = 0;
-  for (const id of Object.keys(r.outputs)) if (wants[id]) best = Math.max(best, 0.75);
+  for (const id of Object.keys(r.outputs)) {
+    if (wants[id]) best = Math.max(best, 0.75);
+    if (needs[id]) best = Math.max(best, needs[id]);
+  }
   for (const id of Object.keys(r.outputs)) {
     const out = FOODS[id];
     if (out) {
@@ -307,14 +343,28 @@ export function rankJobs(world: World, v: Villager): Choice[] {
   };
   // With nothing pressing, people practise what they love: passion work is always a little wanted.
   const floor = (job: JobId) => (passionJobs.includes(job) ? 0.12 : 0);
+  // How many are already at each kind of work: the more on it, the less another is needed.
+  const doing = new Map<string, number>();
+  for (const o of world.villagers) {
+    const t = o.task;
+    if (o === v || !t) continue;
+    const k = t.kind === 'gather' ? t.method : t.kind === 'process' ? t.recipe : null;
+    if (k) doing.set(k, (doing.get(k) ?? 0) + 1);
+  }
+  const crowd = (k: string) => 1 / (1 + (doing.get(k) ?? 0) * 0.3);
   for (const m of availableMethods(world, provided)) {
     // Working at a building, or from a boat, beats doing the same by hand from the bank.
-    const base = Math.max(methodNeed(m, needs), floor(m.job)) * (m.facility ? 1.25 : m.id === 'canoe-fishing' ? 1.5 : 1);
+    let base = Math.max(methodNeed(m, needs), floor(m.job)) * (m.facility ? 1.25 : m.id === 'canoe-fishing' ? 1.5 : 1) * crowd(m.id);
+    // A building only has places for so many.
+    if (m.facility) {
+      const places = (provided.get(m.facility) ?? []).reduce((n, st) => n + (tierOf(st)?.workers ?? 1), 0);
+      if (places && (doing.get(m.id) ?? 0) >= places) base *= 0.15;
+    }
     if (base <= 0) continue;
     out.push({ job: m.job, score: weigh(m.job, base), method: m.id });
   }
   for (const r of availableRecipes(world, provided)) {
-    const base = recipeNeed(world, r, wants);
+    const base = recipeNeed(world, r, wants, needs) * crowd(r.id);
     if (base <= 0) continue;
     const job = recipeJob(r);
     out.push({ job, score: weigh(job, base), recipe: r.id });
@@ -582,8 +632,9 @@ function addXp(v: Villager, job: JobId, amount: number): void {
   v.fulfilment = Math.max(0, Math.min(1, v.fulfilment + (fulfilling ? 0.04 : -0.01)));
 }
 
+let toolWork = 1;
 function workSeconds(v: Villager, job: JobId, base: number): number {
-  return base * (1 - Math.min(0.5, level(v.skills[job] ?? 0) * 0.025));
+  return (base * (1 - Math.min(0.5, level(v.skills[job] ?? 0) * 0.025))) / toolWork;
 }
 
 function headHome(world: World, v: Villager): void {
@@ -593,6 +644,7 @@ function headHome(world: World, v: Villager): void {
 
 /** Advance one villager by dt game seconds. */
 export function stepVillager(world: World, v: Villager, dt: number): void {
+  if (v.id === world.villagers[0]?.id) toolWork = toolBonus(world).work;
   v.hunger = Math.min(1, v.hunger + dt / 1200);
   if (!v.task) decide(world, v);
   const task = v.task!;
@@ -897,8 +949,7 @@ function huntStep(world: World, v: Villager, task: Extract<Task, { kind: 'gather
   face(v, h.x, h.z);
   v.activity = 'gathering';
   const lv = level(v.skills[m.job] ?? 0);
-  const tools = stock(world, 'stone-tools') >= 1 || stock(world, 'obsidian-blades') >= 1 ? 1.25 : 1;
-  const chance = sp.catchChance * (1 + lv * 0.04) * tools;
+  const chance = sp.catchChance * (1 + lv * 0.04) * toolBonus(world).hunt;
   task.attempts++;
   if (world.rng.next() < chance) {
     let carried = 0;

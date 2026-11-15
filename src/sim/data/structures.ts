@@ -252,6 +252,21 @@ export const LINES: readonly Line[] = [
     t('renaissance', 'Levitation workshop', ['levitation'], { bricks: 16, glass: 8, 'iron-ingot': 4 }, 900, 'levitation-workshop', { facilities: ['levitation-workshop'], speed: 1.5, workers: 3 }),
   ]),
 
+  line('workshop', 'Workshop', 'processing', 'camp', 'carpenter', [
+    t('stone', "Craft workshop", ['woodworking'], { ...SHED, 'stone-tools': 2 }, 350, 'craft-workshop', { facilities: ['workshop'], workers: 2 }),
+    t('iron', "Carpenter's workshop", ['timber-framing'], { lumber: 12, 'cut-stone': 4 }, 600, 'carpenter-workshop', { speed: 1.4, workers: 3 }),
+    t('medieval', 'Guild workshop', ['masonry'], { planks: 14, 'cut-stone': 10 }, 800, 'guild-workshop', { speed: 1.8, workers: 4 }),
+    t('renaissance', 'Printing house', ['printing'], { bricks: 16, planks: 10, 'iron-ingot': 2 }, 900, 'printing-house', { facilities: ['printing-press'], speed: 2, workers: 5 }),
+    t('industrial', 'Manufactory', ['factory-system'], { bricks: 50, 'iron-ingot': 10, glass: 10 }, 1300, 'manufactory', { facilities: ['manufactory'], speed: 3, workers: 10 }),
+    t('modern', 'Assembly plant', ['assembly-lines'], { 'iron-ingot': 40, quicklime: 40, glass: 20 }, 1800, 'assembly-plant', { facilities: ['assembly-plant'], speed: 5, workers: 14 }),
+    t('techno-magic', 'Arcane fabricator', ['arcane-engineering'], { 'mana-cell': 6, 'iron-ingot': 30, glass: 20 }, 2000, 'fabricator', { facilities: ['fabricator'], speed: 7, workers: 8 }),
+  ]),
+  line('smithy', 'Smithing', 'processing', 'camp', 'smith', [
+    t('iron', 'Smithy', ['blacksmithing'], { 'cut-stone': 8, lumber: 6, clay: 6 }, 500, 'smithy', { facilities: ['smithy'], workers: 2 }),
+    t('medieval', 'Forge with bellows', ['blast-furnaces'], { 'cut-stone': 16, planks: 6, 'iron-ingot': 4 }, 800, 'forge', { speed: 1.8, workers: 3 }),
+    t('industrial', 'Machine shop', ['steam-pumps'], { bricks: 40, 'iron-ingot': 16, glass: 6 }, 1200, 'machine-shop', { facilities: ['machine-shop'], speed: 3, workers: 8 }),
+  ]),
+
   // ---------------------------------------------------------------- Vehicles: canoes to airships
   line('boatyard', 'Boatbuilding', 'vehicles', 'bank', 'carpenter', [
     t('stone', "Canoe-builder's yard", ['dugout-canoe'], { softwood: 6, reeds: 4, 'stone-tools': 2 }, 300, 'canoe-yard', { facilities: ['canoe-yard'], workers: 2 }),

@@ -59,6 +59,8 @@ export interface Stats {
   /** Food storage in use, and food lost to spoiling yesterday (days of food for one person). */
   storage: string[];
   spoiledYesterday: number;
+  /** What people use of each kind of good: the best on hand, and how many it covers. */
+  goods: { category: string; name: string | null; coverage: number; quality: number; expected: number }[];
 }
 
 /** A building as the renderer needs it. */
@@ -108,7 +110,7 @@ export type FromSim =
   | { type: 'tick'; totalSeconds: number; speed: number; villagers: Float32Array; herds: Float32Array; voyages: Float32Array }
   | { type: 'stats'; stats: Stats }
   | { type: 'wear'; n: number; data: Float32Array; roads: Uint8Array }
-  | { type: 'structures'; list: StructureView[] }
+  | { type: 'structures'; list: StructureView[]; cleared: number[] }
   | { type: 'roster'; villagers: { id: number; name: string; look: number }[] }
   | { type: 'hexInfo'; info: HexInfo | null }
   | { type: 'saved'; json: string };

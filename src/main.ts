@@ -29,7 +29,7 @@ import { WaterSystem } from './render/water';
 import { buildBoat, canoeGeometry, type BoatMode, type BoatView } from './render/boat';
 import { natureMaterial } from './render/materials';
 import { buildSky, skyState } from './render/sky';
-import { buildVegetation } from './render/vegetation';
+import { buildVegetation, type Vegetation } from './render/vegetation';
 import { buildGrass } from './render/grass';
 import { buildCamp, type CampBuild } from './render/camp';
 import { buildVillagers, type VillagerView } from './render/villagers';
@@ -202,6 +202,7 @@ let camp: CampBuild | null = null;
 let villagers: VillagerView | null = null;
 let animals: AnimalsView | null = null;
 let town: TownView | null = null;
+let vegetation: Vegetation | null = null;
 let hexOverlay: THREE.LineSegments | null = null;
 // Inventions only appear once the band has built them.
 const airship = buildAirship();
@@ -234,7 +235,8 @@ worker.onmessage = (e: MessageEvent<FromSim>) => {
     scene.add(animals.group);
     town = buildTown(terrain, townStyle(seed, params.has('style') ? Number(params.get('style')) : undefined));
     scene.add(town.group);
-    scene.add(buildVegetation(msg.props, terrain));
+    vegetation = buildVegetation(msg.props, terrain);
+    scene.add(vegetation);
     camp = buildCamp(msg.camp, terrain);
     scene.add(camp.group);
     villagers = buildVillagers(
@@ -324,6 +326,7 @@ worker.onmessage = (e: MessageEvent<FromSim>) => {
     if (panel.style.display !== 'none') renderPanel();
   } else if (msg.type === 'structures') {
     town?.setStructures(msg.list);
+    vegetation?.hide(msg.cleared);
     const l = msg.list.find((s) => s.model === 'landing' || s.previous === 'landing') ?? msg.list.find((s) => s.line === 'port');
     landingSpot = l && l.built >= 1 ? { x: l.x, z: l.z, rot: l.rot } : null;
     updateMoored();
@@ -450,11 +453,17 @@ function renderPanel(): void {
   const buildings = st.buildings.length
     ? st.buildings.map((b) => `<li><span>${b.name}${b.owner ? ` <span class="quiet">· ${b.owner}</span>` : ''}</span><span class="quiet">${b.state}${b.workers ? ` · ${b.workers} at work` : ''}</span></li>`).join('')
     : '<li class="quiet">Nothing built yet. The band lives in its camp until it learns how to build.</li>';
+  const label = (c: string) => c.charAt(0).toUpperCase() + c.slice(1);
+  const goods = st.goods
+    .filter((g) => g.name || ['clothing', 'tools', 'wares', 'medicine'].includes(g.category))
+    .map((g) => `<li><span>${label(g.category)}: ${g.name ?? '<span class="quiet">none</span>'}</span><span class="quiet">${g.name ? `${Math.round(g.coverage * 100)}% covered · ${g.quality >= g.expected ? 'good for the age' : 'behind the age'}` : 'going without'}</span></li>`)
+    .join('');
   const vehicles = st.vehicles.map((v) => `${v.name}${v.count > 1 ? ` ×${v.count}` : ''}`).join(', ');
   panel.innerHTML = `<button class="close" aria-label="Close">×</button><h3>Civilization</h3>
     <div class="row"><b>${st.era} era</b>${st.nextEra ? `<span class="quiet">${st.nextEra.name}: ${st.nextEra.have} of ${st.nextEra.need} discoveries</span>` : ''}</div>
     <div class="quiet">Food on hand: ${st.food.toFixed(1)} days for one person · spoiled yesterday: ${st.spoiledYesterday.toFixed(1)}</div>
     <div class="quiet">Food storage: ${st.storage.length ? st.storage.join(', ') : 'none yet (open air)'}</div>
+    <h4>Goods in use</h4><ul>${goods}</ul>
     <h4>Discoveries</h4><ul>${disc}</ul>
     <div class="quiet">People: ${st.population} · beds: ${st.housing} · roads: ${st.roads}${vehicles ? ` · boats and craft: ${vehicles}` : ''}</div>
     <h4>Buildings</h4><ul>${buildings}</ul>

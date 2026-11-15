@@ -72,6 +72,10 @@ export interface World {
   built: string[];
   /** Food value lost to spoiling, today and yesterday. */
   spoilage: { day: number; today: number; yesterday: number };
+  /** Plants and rocks cleared away for buildings (indices into props). */
+  cleared: number[];
+  /** How well each kind of good covers the band (updated daily). */
+  living: Partial<Record<string, { coverage: number; quality: number }>>;
   /** Everything the town has built or is building. */
   structures: Structure[];
   nextStructureId: number;
@@ -153,13 +157,15 @@ export function createWorld(seed: number): World {
     hexes: buildHexResources(seed, scene.terrain, scene.biome),
     nodes: buildNodes(seed, scene.props),
     // What is left of the winter store: spring is lean until the berries and grain come.
-    stockpile: { 'dried-meat': 14, 'dried-fruit': 8, nuts: 12, hardwood: 6, stone: 4, flint: 2 },
+    stockpile: { 'dried-meat': 14, 'dried-fruit': 8, nuts: 12, hardwood: 6, stone: 4, flint: 2, 'hide-clothing': 7, spears: 3, 'stone-tools': 4 },
     herds: scene.herds,
     discoveries: [],
     discoveryLog: [],
     seen: [],
     built: [],
     spoilage: { day: 0, today: 0, yesterday: 0 },
+    living: {},
+    cleared: [],
     structures: [],
     nextStructureId: 1,
     planTimer: 30,
