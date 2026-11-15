@@ -46,12 +46,16 @@ export function leafMaterial(sway: number, density = 1): { material: THREE.MeshS
         `#include <color_fragment>
         {
           float facing = abs(dot(normalize(vNormal), normalize(vViewPosition)));
-          // Leaf clusters are slightly denser than the gaps between them.
           float clusters = leafMask(vGrainPos);
-          float a = mix(0.62, 0.93, smoothstep(0.05, 0.6, facing)) * (0.9 + clusters * 0.2);
-          // Distant crowns read as solid masses.
-          a = mix(a, 0.95, smoothstep(60.0, 160.0, length(vViewPosition)));
-          diffuseColor.a = clamp(a * uDensity, 0.0, 1.0);
+          float far = smoothstep(55.0, 150.0, length(vViewPosition));
+          // Leafy fringe: only the silhouette breaks into leaf clusters; the body stays whole.
+          float edge = 1.0 - smoothstep(0.12, 0.38, facing);
+          if (clusters < edge * 0.62 * (1.0 - far)) discard;
+          // Leaf-cluster shading: darker hollows between clumps of leaves.
+          diffuseColor.rgb *= mix(0.72, 1.12, smoothstep(0.3, 0.7, clusters));
+          // Just barely see-through.
+          diffuseColor.a = mix(mix(0.84, 0.95, smoothstep(0.1, 0.6, facing)), 1.0, far) * uDensity;
+          diffuseColor.a = clamp(diffuseColor.a, 0.0, 1.0);
         }`,
       )
       .replace(
