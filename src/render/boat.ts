@@ -77,6 +77,29 @@ function canoeGeometry(): THREE.BufferGeometry {
   return merge([hull, hollow, part(rg, WOOD), part(bundle, color('#a07b52')), part(basket, color('#b89a5e'))]);
 }
 
+/** The canoe's open top as a flat lid at the gunwales; drawn depth-only so water never shows inside. */
+function canoeMask(): THREE.BufferGeometry {
+  const L = 5.2;
+  const B = 0.42;
+  const segL = 24;
+  const pos: number[] = [];
+  const rim = (u: number, side: number) => {
+    const w = Math.pow(Math.sin(Math.PI * u), 0.55);
+    const sheer = 0.12 * Math.pow(Math.abs(u - 0.5) * 2, 3);
+    return new THREE.Vector3((u - 0.5) * L, sheer - 0.01, side * B * Math.max(0.03, w));
+  };
+  for (let i = 0; i < segL; i++) {
+    const a = rim(i / segL, -1);
+    const b = rim((i + 1) / segL, -1);
+    const c = rim((i + 1) / segL, 1);
+    const d = rim(i / segL, 1);
+    for (const q of [a, c, b, a, d, c]) pos.push(q.x, q.y, q.z);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  return g;
+}
+
 function paddleGeometry(): THREE.BufferGeometry {
   const shaft = new THREE.CylinderGeometry(0.018, 0.018, 1.25, 6);
   const blade = new THREE.CapsuleGeometry(0.075, 0.28, 2, 8);
@@ -100,6 +123,12 @@ export function buildBoat(water: WaterSystem, route: [number, number][]): BoatVi
   canoe.castShadow = true;
   canoe.receiveShadow = true;
   group.add(canoe);
+  // Depth-only lid: drawn after the hull and before the (transparent) water, it hides the
+  // water surface inside the hull while leaving everything already drawn visible.
+  const mask = new THREE.Mesh(canoeMask(), new THREE.MeshBasicMaterial({ colorWrite: false, side: THREE.DoubleSide }));
+  mask.renderOrder = 1;
+  mask.userData.noAO = true;
+  canoe.add(mask);
 
   // Paddler kneeling mid-boat, with a paddle held in both hands.
   const paddler: Figure = makeFigure(3, 11);
@@ -121,6 +150,9 @@ export function buildBoat(water: WaterSystem, route: [number, number][]): BoatVi
   let strokeSide = 1;
   let wakeTimer = 0;
   let lastStroke = 0;
+  let smoothWant = heading;
+  let turnRate = 0;
+  let floatY = 0.16;
 
   return {
     group,
@@ -132,14 +164,15 @@ export function buildBoat(water: WaterSystem, route: [number, number][]): BoatVi
         index += dirStep;
       }
       let want = Math.atan2(tz - z, tx - x);
-      // Keep off the banks: compare depth ahead-left and ahead-right.
-      const look = 5;
-      const dl = water.depthAt(x + Math.cos(heading + 0.5) * look, z + Math.sin(heading + 0.5) * look);
-      const dr = water.depthAt(x + Math.cos(heading - 0.5) * look, z + Math.sin(heading - 0.5) * look);
-      if (Math.min(dl, dr) < 0.6) want += dl > dr ? 0.6 : -0.6;
-      let dh = Math.atan2(Math.sin(want - heading), Math.cos(want - heading));
-      dh = THREE.MathUtils.clamp(dh, -0.9 * dt, 0.9 * dt);
-      heading += dh;
+      // Keep off the banks: turn gently toward whichever side ahead is deeper.
+      const look = 6;
+      const dl = water.depthAt(x + Math.cos(heading + 0.45) * look, z + Math.sin(heading + 0.45) * look);
+      const dr = water.depthAt(x + Math.cos(heading - 0.45) * look, z + Math.sin(heading - 0.45) * look);
+      want += THREE.MathUtils.clamp((dl - dr) * 0.35, -0.7, 0.7) * (Math.min(dl, dr) < 1.2 ? 1 : 0.3);
+      smoothWant += Math.atan2(Math.sin(want - smoothWant), Math.cos(want - smoothWant)) * Math.min(1, dt * 1.5);
+      const dh = Math.atan2(Math.sin(smoothWant - heading), Math.cos(smoothWant - heading));
+      turnRate += (THREE.MathUtils.clamp(dh * 1.2, -0.6, 0.6) - turnRate) * Math.min(1, dt * 2);
+      heading += turnRate * dt;
 
       // Paddling thrust plus the river current, with water drag.
       const flow = water.flowAt(x, z);
@@ -152,20 +185,26 @@ export function buildBoat(water: WaterSystem, route: [number, number][]): BoatVi
         x = nx;
         z = nz;
       } else {
-        vel.multiplyScalar(0.5);
+        vel.multiplyScalar(1 - Math.min(1, dt * 3));
       }
 
-      // Float: sample the surface at bow, stern and both sides.
+      // Float: ride the swell (sampled at bow, stern and sides) plus ripples averaged over
+      // the hull, so the boat responds to passing waves but not to its own wake.
       const c = Math.cos(heading);
       const s = Math.sin(heading);
-      const bow = water.heightAt(x + c * 2.2, z + s * 2.2);
-      const stern = water.heightAt(x - c * 2.2, z - s * 2.2);
-      const port = water.heightAt(x - s * 0.5, z + c * 0.5);
-      const star = water.heightAt(x + s * 0.5, z - c * 0.5);
-      group.position.set(x, (bow + stern + port + star) / 4 + 0.16, z);
+      const bow = water.swellAt(x + c * 2.2, z + s * 2.2);
+      const stern = water.swellAt(x - c * 2.2, z - s * 2.2);
+      const port = water.swellAt(x - s * 0.5, z + c * 0.5);
+      const star = water.swellAt(x + s * 0.5, z - c * 0.5);
+      const ripple = THREE.MathUtils.clamp(water.rippleAverage(x, z, 2.6), -0.08, 0.08);
+      const targetY = 0 + (bow + stern + port + star) / 4 + ripple + 0.16;
+      floatY += (targetY - floatY) * Math.min(1, dt * 4);
+      group.position.set(x, floatY, z);
       group.rotation.set(0, -heading, 0);
-      canoe.rotation.z = Math.atan2(bow - stern, 4.4) * 1.2;
-      canoe.rotation.x = Math.atan2(port - star, 1.0) * 0.8 + Math.sin(time * 1.3) * 0.015;
+      const pitch = Math.atan2(bow - stern, 4.4);
+      const roll = Math.atan2(port - star, 1.0) * 0.6 + Math.sin(time * 1.3) * 0.012 - turnRate * 0.08;
+      canoe.rotation.z += (pitch - canoe.rotation.z) * Math.min(1, dt * 3);
+      canoe.rotation.x += (roll - canoe.rotation.x) * Math.min(1, dt * 3);
       paddler.root.rotation.z = canoe.rotation.x;
       paddler.root.rotation.x = -canoe.rotation.z;
 
@@ -181,15 +220,17 @@ export function buildBoat(water: WaterSystem, route: [number, number][]): BoatVi
       paddle.position.set(-0.05 + pull * 0.45, 0.25, strokeSide * 0.48);
       paddle.rotation.set(strokeSide * 0.35, 0, 0.4 - pull * 0.6);
       const bladeWorld = new THREE.Vector3(0, -0.72, 0).applyMatrix4(paddleMesh.matrixWorld);
-      if (pull > 0.85) water.disturb(bladeWorld.x, bladeWorld.z, -0.05, 0.6);
+      if (pull > 0.85) water.disturb(bladeWorld.x, bladeWorld.z, -0.03, 0.5);
 
       // Bow wave and wake, scaled by speed relative to the water.
       wakeTimer += dt;
       const rel = Math.hypot(vel.x - flow.x, vel.y - flow.z);
-      if (wakeTimer > 0.1) {
+      if (wakeTimer > 0.12) {
         wakeTimer = 0;
-        water.disturb(x + c * 2.4, z + s * 2.4, -0.035 * rel, 0.9);
-        water.disturb(x - c * 2.2, z - s * 2.2, 0.02 * rel, 1.2);
+        // V-shaped wake spreading from just behind the stern on both sides.
+        water.disturb(x - c * 3.2 - s * 0.9, z - s * 3.2 + c * 0.9, -0.018 * rel, 0.9);
+        water.disturb(x - c * 3.2 + s * 0.9, z - s * 3.2 - c * 0.9, -0.018 * rel, 0.9);
+        water.disturb(x + c * 3.0, z + s * 3.0, -0.012 * rel, 0.7); // small bow wave ahead
       }
     },
   };

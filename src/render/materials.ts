@@ -7,7 +7,87 @@ import { displace } from './geom';
 export const globalUniforms = {
   uTime: { value: 0 },
   uWind: { value: 1 },
+  uSunDir: { value: new THREE.Vector3(0.5, 0.8, 0.3).normalize() },
+  uSunColor: { value: new THREE.Color(1, 1, 1) },
 };
+
+const LEAF_NOISE = /* glsl */ `
+  float lHash(vec3 p) { return fract(sin(dot(p, vec3(17.1, 113.7, 271.3))) * 43758.5453); }
+  float lNoise(vec3 p) {
+    vec3 i = floor(p); vec3 f = fract(p); f = f * f * (3.0 - 2.0 * f);
+    float a = mix(mix(lHash(i), lHash(i + vec3(1,0,0)), f.x), mix(lHash(i + vec3(0,1,0)), lHash(i + vec3(1,1,0)), f.x), f.y);
+    float b = mix(mix(lHash(i + vec3(0,0,1)), lHash(i + vec3(1,0,1)), f.x), mix(lHash(i + vec3(0,1,1)), lHash(i + vec3(1,1,1)), f.x), f.y);
+    return mix(a, b, f.z);
+  }
+  // Leaf-cluster mask: clumps of leaves with gaps between them.
+  float leafMask(vec3 p) {
+    return lNoise(p * 1.25) * 0.5 + lNoise(p * 3.6 + 3.1) * 0.32 + lNoise(p * 9.0 - 7.3) * 0.18;
+  }`;
+
+/**
+ * Foliage: cut into leaf clusters (gaps let light and sky through, and the silhouette
+ * breaks into a leafy fringe), double-sided so you see the far side of the crown through
+ * the gaps, and translucent — sunlight glows through leaves when the crown is back-lit.
+ */
+export function leafMaterial(sway: number, density = 1): { material: THREE.MeshStandardMaterial; depth: THREE.MeshDepthMaterial } {
+  const mat = natureMaterial({ sway, side: THREE.DoubleSide, grain: 0.45, grainScale: 4.2, roughness: 0.8 });
+  const baseCompile = mat.onBeforeCompile;
+  mat.onBeforeCompile = (shader, renderer) => {
+    baseCompile.call(mat, shader, renderer);
+    shader.uniforms.uSunDir = globalUniforms.uSunDir;
+    shader.uniforms.uSunColor = globalUniforms.uSunColor;
+    shader.uniforms.uDensity = { value: density };
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', `#include <common>\nuniform vec3 uSunDir;\nuniform vec3 uSunColor;\nuniform float uDensity;\n${LEAF_NOISE}`)
+      .replace(
+        '#include <clipping_planes_fragment>',
+        `#include <clipping_planes_fragment>
+        {
+          float facing = abs(dot(normalize(vNormal), normalize(vViewPosition)));
+          // More gaps toward the silhouette, a few throughout.
+          float cut = mix(0.74, 0.41, smoothstep(0.08, 0.7, facing)) / uDensity;
+          // Far away, gaps would shimmer as noise: close them up with distance.
+          cut *= mix(1.0, 0.6, smoothstep(45.0, 150.0, length(vViewPosition)));
+          if (leafMask(vGrainPos) < cut) discard;
+        }`,
+      )
+      .replace(
+        '#include <emissivemap_fragment>',
+        `#include <emissivemap_fragment>
+        {
+          vec3 toEye = normalize(cameraPosition - vGrainPos);
+          float back = pow(max(dot(-toEye, uSunDir), 0.0), 3.0);
+          // Light passing through thin leaves: a soft base glow plus strong back-lighting.
+          // The inside of the crown, seen through gaps, is lit through the leaves rather than black.
+          float inner = gl_FrontFacing ? 0.0 : 0.35;
+          totalEmissiveRadiance += diffuseColor.rgb * uSunColor * (0.12 + inner + back * 0.85) * max(uSunDir.y, 0.0);
+        }`,
+      );
+  };
+  mat.customProgramCacheKey = () => `leaf-${sway}-${density}`;
+
+  // Matching shadow caster, so shadows are dappled rather than solid blobs.
+  const depth = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking });
+  depth.onBeforeCompile = (shader) => {
+    shader.uniforms.uDensity = { value: density };
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', '#include <common>\nvarying vec3 vLeafPos;')
+      .replace(
+        '#include <project_vertex>',
+        `#include <project_vertex>
+        vec4 leafP = vec4(transformed, 1.0);
+        #ifdef USE_INSTANCING
+          leafP = instanceMatrix * leafP;
+        #endif
+        vLeafPos = (modelMatrix * leafP).xyz;`,
+      );
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', `#include <common>\nvarying vec3 vLeafPos;\nuniform float uDensity;\n${LEAF_NOISE}`)
+      .replace('#include <clipping_planes_fragment>', '#include <clipping_planes_fragment>\nif (leafMask(vLeafPos) < 0.5 / uDensity) discard;');
+  };
+  depth.customProgramCacheKey = () => `leaf-depth-${density}`;
+  return { material: mat, depth };
+}
 
 /**
  * Vertex-coloured standard material with optional wind sway.

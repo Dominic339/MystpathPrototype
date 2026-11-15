@@ -16,63 +16,139 @@ const BRASS = color('#b8914b');
 const ENV_LEN = 15;
 const ENV_R = 4.6;
 
+/** Envelope radius at a fraction along its length (-1 tail … 1 nose). */
+function envR(f: number): number {
+  const taper = f < 0 ? 1 - 0.38 * f * f : 1 - 0.08 * f * f;
+  return ENV_R * taper * Math.sqrt(Math.max(0, 1 - f * f));
+}
+
+/** A point on the envelope surface at length fraction f and angle a around the axis (0 = top). */
+function onEnvelope(f: number, a: number, lift = 0): THREE.Vector3 {
+  const r = envR(f) + lift;
+  return V(f * ENV_LEN, Math.cos(a) * r, Math.sin(a) * r);
+}
+
 function envelope(): THREE.BufferGeometry {
-  const g = new THREE.SphereGeometry(1, 48, 24);
-  g.rotateZ(Math.PI / 2); // poles along X
-  const pos = g.getAttribute('position');
-  for (let i = 0; i < pos.count; i++) {
-    const x = pos.getX(i);
-    const y = pos.getY(i);
-    const z = pos.getZ(i);
-    // Teardrop: fuller nose, tapered tail.
-    const taper = x < 0 ? 1 - 0.38 * x * x : 1 - 0.08 * x * x;
-    // Gentle bulge between gores.
-    const ang = Math.atan2(z, y);
-    const scallop = 1 + 0.018 * Math.abs(Math.sin(ang * 6));
-    pos.setXYZ(i, x * ENV_LEN, y * ENV_R * taper * scallop, z * ENV_R * taper * scallop);
+  const lon = 96; // divisible by 12 so gore boundaries fall on vertex meridians
+  const lat = 48;
+  const positions: number[] = [];
+  const colors: number[] = [];
+  const pt = (i: number, j: number) => {
+    const f = -1 + (2 * i) / lat;
+    const a = (j / lon) * Math.PI * 2;
+    // Slight bulge between gore seams.
+    const scallop = 1 + 0.014 * Math.abs(Math.sin(a * 6));
+    const r = envR(f) * scallop;
+    return V(f * ENV_LEN, Math.cos(a) * r, Math.sin(a) * r);
+  };
+  const seam = color('#5a1c24');
+  for (let i = 0; i < lat; i++)
+    for (let j = 0; j < lon; j++) {
+      const a = pt(i, j);
+      const b = pt(i + 1, j);
+      const c = pt(i + 1, j + 1);
+      const d = pt(i, j + 1);
+      // Colour per gore panel (face), so stripes have crisp edges along the seams.
+      const gore = Math.floor((j / lon) * 12);
+      const atSeam = j % (lon / 12) === 0;
+      const base = (gore % 2 === 0 ? CREAM : CLARET).clone();
+      if (atSeam) base.lerp(seam, 0.5);
+      const fmid = -1 + (2 * (i + 0.5)) / lat;
+      const angMid = ((j + 0.5) / lon) * Math.PI * 2;
+      // Weather-stained underside and a slightly sun-faded top.
+      const down = Math.max(0, -Math.cos(angMid));
+      base.lerp(color('#5c5048'), down * down * 0.3);
+      base.multiplyScalar(0.92 + 0.08 * Math.cos(angMid) + 0.04 * Math.sin(fmid * 9));
+      for (const q of [a, c, b, a, d, c]) {
+        positions.push(q.x, q.y, q.z);
+        const jit = jitter(base, 0.025, q.x * 0.3, q.y, q.z);
+        colors.push(jit.r, jit.g, jit.b);
+      }
+    }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  g.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+  // Smooth normals: derive from the analytic shape rather than flat faces.
+  const nrm = new Float32Array(positions.length);
+  for (let k = 0; k < positions.length; k += 3) {
+    const x = positions[k];
+    const y = positions[k + 1];
+    const z = positions[k + 2];
+    const f = x / ENV_LEN;
+    const e = 0.002;
+    const dr = (envR(Math.min(1, f + e)) - envR(Math.max(-1, f - e))) / (2 * e * ENV_LEN);
+    const rr = Math.hypot(y, z) || 1;
+    const n = V(-dr, y / rr, z / rr).normalize();
+    nrm[k] = n.x;
+    nrm[k + 1] = n.y;
+    nrm[k + 2] = n.z;
   }
-  g.computeVertexNormals();
-  return part(g, (p, n) => {
-    const ang = Math.atan2(p.z, p.y);
-    const gore = Math.floor(((ang + Math.PI) / (Math.PI * 2)) * 12);
-    const c = (gore % 2 === 0 ? CREAM : CLARET).clone();
-    // Weathering toward the bottom, seams darker.
-    const seam = Math.abs(Math.sin(ang * 6));
-    c.multiplyScalar(0.82 + 0.18 * seam);
-    mix(c, color('#5c5048'), Math.max(0, -n.y - 0.4) * 0.35, c);
-    return jitter(c, 0.04, p.x, p.y, p.z);
-  });
+  g.setAttribute('normal', new THREE.BufferAttribute(nrm, 3));
+  return g;
 }
 
 function bands(): THREE.BufferGeometry {
   const parts: THREE.BufferGeometry[] = [];
-  for (const fx of [-0.62, -0.2, 0.25, 0.65]) {
-    const x = fx * ENV_LEN;
-    const taper = fx < 0 ? 1 - 0.38 * fx * fx : 1 - 0.08 * fx * fx;
-    const t = new THREE.TorusGeometry(ENV_R * taper * 1.005, 0.07, 6, 48);
+  // Brass hoops that sit snugly on the envelope.
+  for (const f of [-0.62, -0.2, 0.25, 0.62]) {
+    const t = new THREE.TorusGeometry(envR(f) * 1.016 + 0.02, 0.07, 8, 72);
     t.rotateY(Math.PI / 2);
-    t.translate(x, 0, 0);
+    t.translate(f * ENV_LEN, 0, 0);
     parts.push(part(t, BRASS));
   }
-  // A spine along the top.
-  parts.push(part(limb(V(-ENV_LEN * 0.8, ENV_R * 0.83, 0), V(ENV_LEN * 0.85, ENV_R * 0.92, 0), 0.08, 0.08, 6, 0.4), BRASS));
+  // A keel spine following the curve of the top, ending in finials.
+  const spinePts: THREE.Vector3[] = [];
+  for (let k = 0; k <= 24; k++) spinePts.push(onEnvelope(-0.86 + (k / 24) * 1.74, 0, 0.09));
+  const spine = new THREE.TubeGeometry(new THREE.CatmullRomCurve3(spinePts), 96, 0.075, 8, false);
+  parts.push(part(spine, BRASS));
+  for (const end of [spinePts[0], spinePts[spinePts.length - 1]]) {
+    const ball = new THREE.SphereGeometry(0.13, 10, 8);
+    ball.translate(end.x, end.y, end.z);
+    parts.push(part(ball, BRASS));
+  }
+  // Nose cap and tail cone.
+  const nose = new THREE.SphereGeometry(0.75, 16, 10, 0, Math.PI * 2, 0, Math.PI / 2);
+  nose.rotateZ(-Math.PI / 2);
+  nose.scale(0.55, 1, 1);
+  nose.translate(ENV_LEN - 0.32, 0, 0);
+  parts.push(part(nose, BRASS));
+  const tail = new THREE.ConeGeometry(0.42, 1.2, 14);
+  tail.rotateZ(Math.PI / 2);
+  tail.translate(-ENV_LEN - 0.35, 0, 0);
+  parts.push(part(tail, BRASS));
   return merge(parts);
 }
 
 function fins(): THREE.BufferGeometry {
   const parts: THREE.BufferGeometry[] = [];
+  // Root edge follows the envelope's curve so each fin sits flush on the tail.
+  const f0 = -0.52;
+  const f1 = -0.93;
+  const shape = new THREE.Shape();
+  const steps = 8;
+  for (let k = 0; k <= steps; k++) {
+    const f = f0 + (f1 - f0) * (k / steps);
+    const r = envR(f) - 0.25;
+    if (k === 0) shape.moveTo(f * ENV_LEN, r);
+    else shape.lineTo(f * ENV_LEN, r);
+  }
+  shape.lineTo(f1 * ENV_LEN - 0.9, envR(f1) + 2.7);
+  shape.lineTo(f0 * ENV_LEN - 3.0, envR(f0) + 1.7);
+  shape.closePath();
   for (let k = 0; k < 4; k++) {
-    const shape = new THREE.Shape();
-    shape.moveTo(0, 0);
-    shape.lineTo(-4.2, 0);
-    shape.lineTo(-5.4, 3.2);
-    shape.lineTo(-2.4, 3.0);
-    shape.closePath();
-    const g = new THREE.ExtrudeGeometry(shape, { depth: 0.12, bevelEnabled: false });
-    g.translate(0, 0, -0.06);
-    g.translate(-ENV_LEN * 0.62, ENV_R * 0.45, 0);
+    const g = new THREE.ExtrudeGeometry(shape, { depth: 0.14, bevelEnabled: true, bevelThickness: 0.03, bevelSize: 0.03, bevelSegments: 1 });
+    g.translate(0, 0, -0.07);
     g.rotateX((k / 4) * Math.PI * 2 + Math.PI / 4);
-    parts.push(part(g, (p) => (Math.abs(p.y) + Math.abs(p.z) > ENV_R * 0.9 ? CLARET : CREAM)));
+    parts.push(
+      part(g, (p) => {
+        const radial = Math.hypot(p.y, p.z);
+        const f = p.x / ENV_LEN;
+        const out = radial - envR(Math.max(-0.99, Math.min(0.99, f)));
+        if (out > 1.9) return CLARET; // painted tip
+        if (Math.abs(p.x - (f1 * ENV_LEN + 1.6)) < 0.05) return WOOD_DARK; // control-surface hinge line
+        return CREAM.clone().multiplyScalar(0.95);
+      }),
+    );
   }
   return merge(parts);
 }
@@ -113,6 +189,10 @@ function hull(): THREE.BufferGeometry {
   g.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
   g.computeVertexNormals();
   const hullPart = part(g, (p) => {
+    // Brass-rimmed portholes along both sides.
+    const px = ((p.x + 100) % 1.5) - 0.75;
+    const pd = Math.hypot(px, p.y + 0.55);
+    if (Math.abs(p.x) < 4.6 && pd < 0.2) return pd < 0.14 ? color('#1d2a33') : BRASS;
     const plank = Math.floor((p.y + 3) * 5.5);
     const c = mix(WOOD_DARK, WOOD_LIGHT, ((plank * 7) % 5) / 5 * 0.6 + 0.2);
     if (Math.abs(p.y - 0.05) < 0.08) c.copy(CLARET); // painted strake
@@ -141,7 +221,39 @@ function hull(): THREE.BufferGeometry {
       rails.push(part(limb(V(x, 0.1, side * B * 0.85), V(x, 0.76, side * B * 0.85), 0.03, 0.03, 4), WOOD_DARK));
     }
   }
-  return merge([hullPart, deckPart, cabinPart, roofPart, ...rails]);
+  // Rudder at the stern.
+  const rudder = new THREE.BoxGeometry(1.1, 1.5, 0.08);
+  rudder.translate(-L / 2 - 0.35, -0.3, 0);
+  const rudderPart = part(rudder, (p) => (p.y < -0.6 ? CLARET : WOOD));
+  // Cabin door and window frames.
+  const door = new THREE.BoxGeometry(0.06, 1.0, 0.6);
+  door.translate(-1.0 + 0.02, 0.6, 0);
+  // Deck cargo: crates, barrels and a coiled rope.
+  const cargo: THREE.BufferGeometry[] = [];
+  const crate = (x: number, z: number, sz: number, rot: number) => {
+    const c = new THREE.BoxGeometry(sz, sz, sz);
+    c.rotateY(rot);
+    c.translate(x, 0.13 + sz / 2, z);
+    cargo.push(part(c, (p) => (Math.abs(((p.x + p.z) * 4) % 1) < 0.12 || Math.abs((p.y * 4) % 1) < 0.1 ? WOOD_DARK : WOOD_LIGHT)));
+  };
+  crate(1.2, 0.55, 0.6, 0.2);
+  crate(1.9, 0.5, 0.5, -0.3);
+  crate(1.55, 0.6, 0.42, 0.6);
+  for (const [x, z] of [[2.9, -0.6], [3.4, -0.5]]) {
+    const b = new THREE.CylinderGeometry(0.26, 0.26, 0.62, 12);
+    b.translate(x, 0.44, z);
+    cargo.push(part(b, (p) => (Math.abs(p.y - 0.25) < 0.04 || Math.abs(p.y - 0.63) < 0.04 ? color('#4a4540') : color('#7a5534'))));
+  }
+  const rope = new THREE.TorusGeometry(0.28, 0.07, 6, 16);
+  rope.rotateX(Math.PI / 2);
+  rope.translate(0.3, 0.18, -0.6);
+  cargo.push(part(rope, color('#a89068')));
+  // Bow mast with a pennant.
+  const mast = limb(V(L * 0.38, 0.1, 0), V(L * 0.38, 2.3, 0), 0.05, 0.035, 6);
+  const pennant = new THREE.BufferGeometry();
+  pennant.setAttribute('position', new THREE.Float32BufferAttribute([L * 0.38, 2.25, 0, L * 0.38, 1.85, 0, L * 0.38 + 1.1, 2.0, 0.05, L * 0.38, 2.25, 0, L * 0.38 + 1.1, 2.0, 0.05, L * 0.38, 1.85, 0], 3));
+  pennant.computeVertexNormals();
+  return merge([hullPart, deckPart, cabinPart, roofPart, rudderPart, part(door, WOOD_DARK), part(mast, WOOD_DARK), part(pennant, CLARET), ...cargo, ...rails]);
 }
 
 function propeller(): THREE.Group {
@@ -194,16 +306,17 @@ export function buildAirship(): AirshipBuild {
   const hullTop = -ENV_R - 3.4 + 0.75;
   const struts: THREE.BufferGeometry[] = [];
   for (const x of [-4.2, 4.0])
-    for (const s of [-1, 1]) struts.push(part(limb(V(x, hullTop, s * 1.2), V(x * 1.1, -ENV_R * 0.88, s * 1.6), 0.07, 0.06, 6), WOOD_DARK));
+    for (const side of [-1, 1]) {
+      const top = onEnvelope((x * 1.1) / ENV_LEN, Math.PI - side * 0.35, -0.05);
+      struts.push(part(limb(V(x, hullTop, side * 1.2), top, 0.07, 0.06, 6), WOOD_DARK));
+    }
   mk(merge(struts));
   const rigPts: number[] = [];
   for (let k = 0; k <= 10; k++) {
     const x = -5 + k;
-    for (const s of [-1, 1]) {
-      const ex = x * 1.35;
-      const ef = ex / ENV_LEN;
-      const taper = ef < 0 ? 1 - 0.38 * ef * ef : 1 - 0.08 * ef * ef;
-      rigPts.push(x, hullTop, s * 1.25, ex, -ENV_R * taper * 0.7, s * ENV_R * taper * 0.7);
+    for (const side of [-1, 1]) {
+      const anchor = onEnvelope((x * 1.35) / ENV_LEN, Math.PI - side * 0.75, 0.02);
+      rigPts.push(x, hullTop, side * 1.25, anchor.x, anchor.y, anchor.z);
     }
   }
   const rigGeo = new THREE.BufferGeometry();

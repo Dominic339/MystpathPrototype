@@ -267,6 +267,8 @@ function frame(): void {
 
   const s = skyState(gameSeconds);
   sky.update(s);
+  globalUniforms.uSunDir.value.copy(s.lightDir);
+  globalUniforms.uSunColor.value.copy(s.lightColor).multiplyScalar(Math.min(1, s.lightIntensity / 3));
   rig.update(dt);
   const pivot = rig.pivot;
   sun.position.copy(pivot).addScaledVector(s.lightDir, 300);

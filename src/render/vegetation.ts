@@ -6,7 +6,7 @@ import type { PropInstance, PropKind } from '../sim/world';
 import type { Heightfield } from '../sim/terrain';
 import { hash01 } from '../sim/rng';
 import { color, jitter, limb, merge, mix, noise3, part } from './geom';
-import { natureMaterial, rockShape } from './materials';
+import { leafMaterial, natureMaterial, rockShape } from './materials';
 import { canopyMass, limbTube, rand, type BarkPalette, type Knot, type Lobe } from './trees';
 
 const V = (x: number, y: number, z: number) => new THREE.Vector3(x, y, z);
@@ -32,7 +32,12 @@ const OAK_BARK: BarkPalette = { dark: color('#33251a'), light: color('#6e5440'),
  * Broadleaf oak. Variants differ in form: a leaning single trunk that forks into the crown,
  * or a twin trunk split from the base. Visible limbs run up into one solid canopy.
  */
-function oak(seed: number): THREE.BufferGeometry {
+interface PlantGeo {
+  wood?: THREE.BufferGeometry;
+  leaves?: THREE.BufferGeometry;
+}
+
+function oak(seed: number): PlantGeo {
   const parts: THREE.BufferGeometry[] = [];
   const twin = seed % 3 === 1;
   const h = rand(seed, 1, 3.6, 4.6);
@@ -64,7 +69,7 @@ function oak(seed: number): THREE.BufferGeometry {
       const end = V(top.x + Math.cos(a) * reach, top.y + rise, top.z + Math.sin(a) * reach);
       const mid = V(top.x + Math.cos(a) * reach * 0.45, top.y + rise * 0.35, top.z + Math.sin(a) * reach * 0.45);
       parts.push(limbTube({ points: [top.clone().add(V(0, -0.3, 0)), mid, end], r0: r0 * 0.5, r1: 0.06, knots: b % 2 ? knots(1, seed + b) : [] }, OAK_BARK, 7, 9));
-      lobes.push({ center: end.clone().add(V(Math.cos(a) * 0.4, 0.7, Math.sin(a) * 0.4)), radius: rand(seed, 23 + st, 1.3, 1.8, b) });
+      lobes.push({ center: end.clone().add(V(Math.cos(a) * 0.4, 0.7, Math.sin(a) * 0.4)), radius: rand(seed, 23 + st, 1.15, 1.6, b) });
     }
     // A low side branch below the crown.
     if (!twin || st === 0) {
@@ -75,10 +80,9 @@ function oak(seed: number): THREE.BufferGeometry {
       parts.push(limbTube({ points: [base, V(base.x + Math.cos(a) * 1.2, y + 0.4, base.z + Math.sin(a) * 1.2), end], r0: 0.13, r1: 0.04 }, OAK_BARK, 6, 8));
       lobes.push({ center: end.clone().add(V(0, 0.4, 0)), radius: 1.3 });
     }
-    lobes.push({ center: top.clone().add(V(0, 2.7, 0)), radius: twin ? 1.7 : 2.1 });
+    lobes.push({ center: top.clone().add(V(0, 2.6, 0)), radius: twin ? 1.5 : 1.85 });
   }
-  parts.push(canopyMass(lobes, seed, { deep: LEAF_DEEP, base: LEAF, sun: LEAF_SUN }, 4));
-  return merge(parts);
+  return { wood: merge(parts), leaves: canopyMass(lobes, seed, { deep: LEAF_DEEP, base: LEAF, sun: LEAF_SUN }, 4) };
 }
 
 const BIRCH_BARK: BarkPalette = {
@@ -93,7 +97,7 @@ const BIRCH_BARK: BarkPalette = {
 };
 
 /** Slender birch: thin pale trunk (sometimes a pair), gentle lean, tall narrow crown. */
-function birch(seed: number): THREE.BufferGeometry {
+function birch(seed: number): PlantGeo {
   const parts: THREE.BufferGeometry[] = [];
   const h = rand(seed, 1, 5.4, 6.8);
   const pair = seed % 2 === 0;
@@ -120,12 +124,12 @@ function birch(seed: number): THREE.BufferGeometry {
     }
     lobes.push({ center: top.clone().add(V(0, 1.2, 0)), radius: 1.4 }, { center: top.clone().add(V(0, -0.2, 0)), radius: 1.2 });
   }
-  parts.push(canopyMass(lobes, seed + 3, { deep: color('#3d5d26'), base: color('#6f9437'), sun: color('#b8c25a') }, 4));
-  return merge(parts);
+  return { wood: merge(parts), leaves: canopyMass(lobes, seed + 3, { deep: color('#3d5d26'), base: color('#6f9437'), sun: color('#b8c25a') }, 4) };
 }
 
-function pine(seed: number): THREE.BufferGeometry {
+function pine(seed: number): PlantGeo {
   const parts: THREE.BufferGeometry[] = [];
+  const boughs: THREE.BufferGeometry[] = [];
   const h = 7 + hash01(seed, 1) * 2.5;
   parts.push(part(limb(V(0, -0.3, 0), V(0, h, 0), 0.3, 0.08, 7), barkColor(BARK_DARK, color('#6a4b33'))));
   const tiers = 6;
@@ -148,7 +152,7 @@ function pine(seed: number): THREE.BufferGeometry {
     }
     cone.computeVertexNormals();
     cone.translate(0, y, 0);
-    parts.push(
+    boughs.push(
       part(cone, (p, n) => {
         const tip = Math.max(0, Math.hypot(p.x, p.z) / r);
         const c = mix(PINE_DEEP, PINE, tip * 0.8 + n.y * 0.2);
@@ -157,10 +161,10 @@ function pine(seed: number): THREE.BufferGeometry {
       }),
     );
   }
-  return merge(parts);
+  return { wood: merge(parts), leaves: merge(boughs) };
 }
 
-function bush(seed: number): THREE.BufferGeometry {
+function bush(seed: number): PlantGeo {
   const parts: THREE.BufferGeometry[] = [];
   const lobes: Lobe[] = [];
   for (let k = 0; k < 4; k++) {
@@ -170,7 +174,6 @@ function bush(seed: number): THREE.BufferGeometry {
   const g = canopyMass(lobes, seed, { deep: color('#22391a'), base: color('#456f2a'), sun: color('#86a83d') }, 3);
   // Squash so the bush sits low and wide.
   g.scale(1, 0.85, 1);
-  parts.push(g);
   // Occasional berries.
   if (hash01(seed, 9) > 0.4) {
     const berry = color('#9a1f2c');
@@ -181,7 +184,7 @@ function bush(seed: number): THREE.BufferGeometry {
       parts.push(part(g, berry));
     }
   }
-  return merge(parts);
+  return { wood: parts.length ? merge(parts) : undefined, leaves: g };
 }
 
 const ROCK_DARK = color('#5d5a55');
@@ -242,21 +245,30 @@ function flowers(seed: number): THREE.BufferGeometry {
 
 const VARIANTS = 3;
 
-function buildKind(kind: PropKind, v: number): { geo: THREE.BufferGeometry; sway: number; flat: boolean; shadow: boolean } {
+interface BuiltKind {
+  geo: PlantGeo;
+  sway: number;
+  flat: boolean;
+  shadow: boolean;
+  /** Foliage density: higher means fewer gaps (needles are denser than broad leaves). */
+  density: number;
+}
+
+function buildKind(kind: PropKind, v: number): BuiltKind {
   const seed = 101 + v * 37;
   switch (kind) {
-    case 'oak': return { geo: oak(seed), sway: 0.0016, flat: false, shadow: true };
-    case 'birch': return { geo: birch(seed), sway: 0.002, flat: false, shadow: true };
-    case 'pine': return { geo: pine(seed), sway: 0.0009, flat: false, shadow: true };
-    case 'bush': return { geo: bush(seed), sway: 0.02, flat: false, shadow: true };
-    case 'rock': return { geo: rock(seed, 0.8), sway: 0, flat: true, shadow: true };
-    case 'boulder': return { geo: rock(seed + 5, 2.2), sway: 0, flat: true, shadow: true };
-    case 'reeds': return { geo: reeds(seed), sway: 0.05, flat: false, shadow: false };
-    case 'flowers': return { geo: flowers(seed), sway: 0.25, flat: false, shadow: false };
+    case 'oak': return { geo: oak(seed), sway: 0.0016, flat: false, shadow: true, density: 1 };
+    case 'birch': return { geo: birch(seed), sway: 0.002, flat: false, shadow: true, density: 0.95 };
+    case 'pine': return { geo: pine(seed), sway: 0.0009, flat: false, shadow: true, density: 1.5 };
+    case 'bush': return { geo: bush(seed), sway: 0.02, flat: false, shadow: true, density: 1.0 };
+    case 'rock': return { geo: { wood: rock(seed, 0.8) }, sway: 0, flat: true, shadow: true, density: 1 };
+    case 'boulder': return { geo: { wood: rock(seed + 5, 2.2) }, sway: 0, flat: true, shadow: true, density: 1 };
+    case 'reeds': return { geo: { wood: reeds(seed) }, sway: 0.05, flat: false, shadow: false, density: 1 };
+    case 'flowers': return { geo: { wood: flowers(seed) }, sway: 0.25, flat: false, shadow: false, density: 1 };
   }
 }
 
-/** Build one InstancedMesh per kind × variant, placed on the terrain. */
+/** Build InstancedMeshes per kind × variant (wood and foliage separately), placed on the terrain. */
 export function buildVegetation(props: PropInstance[], terrain: Heightfield): THREE.Group {
   const group = new THREE.Group();
   group.name = 'vegetation';
@@ -275,15 +287,27 @@ export function buildVegetation(props: PropInstance[], terrain: Heightfield): TH
   for (const [key, list] of buckets) {
     const [kind, v] = key.split(':');
     const built = buildKind(kind as PropKind, Number(v));
-    const leafy = kind === 'oak' || kind === 'birch' || kind === 'pine' || kind === 'bush';
-    const mat = natureMaterial({
-      sway: built.sway,
-      flat: built.flat,
-      side: kind === 'reeds' ? THREE.DoubleSide : THREE.FrontSide,
-      grain: leafy ? 0.5 : built.flat ? 0.18 : 0.12,
-      grainScale: leafy ? 4.2 : 1.6,
-    });
-    const mesh = new THREE.InstancedMesh(built.geo, mat, list.length);
+    const meshes: THREE.InstancedMesh[] = [];
+    if (built.geo.wood) {
+      const mat = natureMaterial({
+        sway: built.sway,
+        flat: built.flat,
+        side: kind === 'reeds' ? THREE.DoubleSide : THREE.FrontSide,
+        grain: built.flat ? 0.18 : 0.12,
+        grainScale: 1.6,
+      });
+      const mesh = new THREE.InstancedMesh(built.geo.wood, mat, list.length);
+      mesh.castShadow = built.shadow;
+      meshes.push(mesh);
+    }
+    if (built.geo.leaves) {
+      const leaf = leafMaterial(built.sway, built.density);
+      const mesh = new THREE.InstancedMesh(built.geo.leaves, leaf.material, list.length);
+      mesh.customDepthMaterial = leaf.depth;
+      mesh.castShadow = built.shadow;
+      mesh.userData.noAO = true;
+      meshes.push(mesh);
+    }
     list.forEach((p, i) => {
       // Sink slightly so bases never float on slopes.
       const y = terrain.sample(p.x, p.z) - (kind === 'boulder' ? 0.6 : 0.05);
@@ -291,18 +315,22 @@ export function buildVegetation(props: PropInstance[], terrain: Heightfield): TH
       s.setScalar(p.scale);
       t.set(p.x, y, p.z);
       m.compose(t, q, s);
-      mesh.setMatrixAt(i, m);
       // Each plant gets its own tint: some greener, some more olive or autumn-touched.
       const r = hash01(31, i, kind.length);
+      const leafy = kind === 'oak' || kind === 'birch' || kind === 'pine' || kind === 'bush';
       const tint = leafy
-        ? new THREE.Color().setHSL(0.0, 0, 1).multiplyScalar(0.82 + r * 0.32).lerp(new THREE.Color(1.15, 1.05, 0.7), hash01(32, i) * 0.35)
+        ? new THREE.Color(1, 1, 1).multiplyScalar(0.82 + r * 0.32).lerp(new THREE.Color(1.15, 1.05, 0.7), hash01(32, i) * 0.35)
         : new THREE.Color(1, 1, 1).multiplyScalar(0.85 + r * 0.25);
-      mesh.setColorAt(i, tint);
+      for (const mesh of meshes) {
+        mesh.setMatrixAt(i, m);
+        mesh.setColorAt(i, tint);
+      }
     });
-    mesh.castShadow = built.shadow;
-    mesh.receiveShadow = true;
-    mesh.computeBoundingSphere();
-    group.add(mesh);
+    for (const mesh of meshes) {
+      mesh.receiveShadow = true;
+      mesh.computeBoundingSphere();
+      group.add(mesh);
+    }
   }
   return group;
 }

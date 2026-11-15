@@ -134,6 +134,24 @@ export class WaterSystem {
     return this.field.waterLevel + h + swell(x, z, this.time) * depthGain;
   }
 
+  /** Swell height (no ripples) at a point, relative to the water level. */
+  swellAt(x: number, z: number): number {
+    return swell(x, z, this.time) * THREE.MathUtils.clamp(this.depthAt(x, z) / 2.5, 0, 1);
+  }
+
+  /** Ripple height averaged over a disc — what a hull of that size actually feels. */
+  rippleAverage(x: number, z: number, radius: number): number {
+    let sum = 0;
+    let n = 0;
+    for (let a = 0; a < 8; a++) {
+      const px = x + Math.cos((a / 8) * Math.PI * 2) * radius;
+      const pz = z + Math.sin((a / 8) * Math.PI * 2) * radius;
+      sum += this.heightAt(px, pz) - this.field.waterLevel - this.swellAt(px, pz);
+      n++;
+    }
+    return sum / n;
+  }
+
   /** River current at a point, in m/s. */
   flowAt(x: number, z: number): { x: number; z: number } {
     const r = this.flow.res;
