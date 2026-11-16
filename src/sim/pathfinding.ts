@@ -15,6 +15,8 @@ export class NavGrid {
   wear: Float32Array;
   /** Road surface tier per cell (0 = none; see ROAD_TIERS). */
   road: Uint8Array;
+  /** What stands in a cell: walking through a building or a planted field costs dear (1 = open ground). */
+  obstacle: Float32Array;
   /** Connected region per cell (-1 = impassable): routes between regions are impossible. */
   region: Int32Array;
   private gBuf?: Float32Array;
@@ -30,6 +32,7 @@ export class NavGrid {
     this.cost = new Float32Array(this.n * this.n);
     this.wear = new Float32Array(this.n * this.n);
     this.road = new Uint8Array(this.n * this.n);
+    this.obstacle = new Float32Array(this.n * this.n).fill(1);
     this.region = new Int32Array(this.n * this.n);
     for (let j = 0; j < this.n; j++)
       for (let i = 0; i < this.n; i++) {
@@ -154,7 +157,7 @@ export class NavGrid {
   /** Cost of stepping into a cell, cheaper where the ground is worn into a path. */
   private stepCost(k: number): number {
     const road = this.road[k] ? 0.35 / (1 + this.road[k] * 0.15) : 1;
-    return this.cost[k] * (1 - 0.6 * Math.min(1, this.wear[k])) * road;
+    return this.cost[k] * (1 - 0.6 * Math.min(1, this.wear[k])) * road * this.obstacle[k];
   }
 
   /** Nearest passable cell to a point (for targets at the water's edge). */
@@ -278,6 +281,27 @@ export class NavGrid {
   roadAt(x: number, z: number): number {
     const { i, j } = this.cellOf(x, z);
     return this.road[j * this.n + i];
+  }
+
+  /** Bare soil of a planted field: looks worn, and people keep off it. */
+  setField(x: number, z: number): void {
+    const { i, j } = this.cellOf(x, z);
+    const k = j * this.n + i;
+    if (this.road[k]) return;
+    this.obstacle[k] = Math.max(this.obstacle[k], 4);
+  }
+
+  /** A building's ground: people go round. */
+  setBuilding(x: number, z: number, r: number): void {
+    const { i, j } = this.cellOf(x, z);
+    const n = Math.ceil(r / NAV_CELL);
+    for (let dj = -n; dj <= n; dj++)
+      for (let di = -n; di <= n; di++) {
+        const ii = i + di;
+        const jj = j + dj;
+        if (ii < 0 || jj < 0 || ii >= this.n || jj >= this.n || Math.hypot(di, dj) * NAV_CELL > r) continue;
+        this.obstacle[jj * this.n + ii] = 14;
+      }
   }
 
   /** Feet wear the ground. */

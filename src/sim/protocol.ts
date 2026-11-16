@@ -56,6 +56,10 @@ export interface Stats {
   population: number;
   housing: number;
   roads: string;
+  /** Streets laid, and how people live: average noise at home (0..1) and walk to work (m). */
+  streets: number;
+  homeNoise: number;
+  walkToWork: number;
   /** Food storage in use, and food lost to spoiling yesterday (days of food for one person). */
   storage: string[];
   spoiledYesterday: number;
@@ -78,6 +82,11 @@ export interface StructureView {
   rot: number;
   variant: number;
   animals: number;
+  /** What a working was sunk for, and how big its heaps have grown (0..4). */
+  deposit?: string;
+  heap?: number;
+  /** A farm's fenced field: where it lies, what grows there and how far along it is. */
+  field?: { x: number; z: number; w: number; d: number; rot: number; kind: string; planted: boolean; toClear: number; era: number; species?: string };
 }
 
 export interface HexInfo {
@@ -111,6 +120,7 @@ export type FromSim =
   | { type: 'stats'; stats: Stats }
   | { type: 'wear'; n: number; data: Float32Array; roads: Uint8Array }
   | { type: 'structures'; list: StructureView[]; cleared: number[] }
+  | { type: 'streets'; streets: { ax: number; az: number; bx: number; bz: number; kind: 'main' | 'side' | 'lane'; tier: number }[] }
   | { type: 'roster'; villagers: { id: number; name: string; look: number }[] }
   | { type: 'hexInfo'; info: HexInfo | null }
   | { type: 'saved'; json: string };

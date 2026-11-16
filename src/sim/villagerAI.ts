@@ -17,7 +17,8 @@ import { itemName, RECIPES, type Recipe } from './data/processing';
 import { FACILITY_BY_ID } from './data/facilities';
 import { currentEra, gainInsight, knows, logEvent, noteSeen, workable } from './discovery';
 import { ROAD_TIERS } from './data/structures';
-import { bedFor, buildingWants, buildWork, lineOf, providedFacilities, tierOf, toolBonus, underConstruction, type Structure } from './town';
+import { places, plantField, bedFor, buildingWants, buildWork, lineOf, providedFacilities, tierOf, toolBonus, underConstruction, type Structure } from './town';
+import { CLEARING, clearProp } from './fields';
 import { GOOD_BY_ID, GOOD_CATEGORIES, GOODS } from './data/goods';
 import { hexToWorld } from './hex';
 import { CYCLE_SECONDS, SEASONS } from './time';
@@ -41,6 +42,7 @@ export type Task =
     }
   | { kind: 'process'; recipe: string; stage: 'going' | 'working'; spot: { x: number; z: number }; face: { x: number; z: number }; structure?: number }
   | { kind: 'build'; structure: number; stage: 'going' | 'working'; spot: { x: number; z: number } }
+  | { kind: 'clear'; structure: number; prop: number; stage: 'going' | 'working'; spot: { x: number; z: number } }
   | {
       kind: 'boat';
       herd: number;
@@ -83,6 +85,11 @@ export interface Villager {
   path: { x: number; z: number }[];
   timer: number;
   tent: number;
+  /** The home they sleep in and the building they last worked at (structure ids). */
+  home: number | null;
+  work: number | null;
+  /** How well they rest at home (1 = in peace; noise wears it down and slows their work). */
+  rest: number;
   /** Happiness 0..1, rising when doing work that matches their passion. */
   fulfilment: number;
   /** Insight built toward each discovery. */
@@ -229,7 +236,7 @@ let needsCache: { world: World; at: number; n: Record<string, number> } | null =
 /** What the band needs, recomputed at most once a game second. */
 export function materialNeeds(world: World): Record<string, number> {
   const now = world.clock.totalSeconds;
-  if (needsCache && needsCache.world === world && now - needsCache.at < 1 && now >= needsCache.at) return needsCache.n;
+  if (needsCache && needsCache.world === world && now - needsCache.at < 4 && now >= needsCache.at) return needsCache.n;
   const n = computeNeeds(world);
   needsCache = { world, at: now, n };
   return n;
@@ -314,7 +321,7 @@ function recipeJob(r: Recipe): JobId {
   return FACILITY_BY_ID.get(r.facility)?.job ?? 'cook';
 }
 
-type Choice = { job: JobId; score: number; method?: string; recipe?: string; site?: number };
+type Choice = { job: JobId; score: number; method?: string; recipe?: string; site?: number; clear?: number };
 
 /** Villagers working at (or heading to) a building. */
 function workersAt(world: World, id: number): number {
@@ -357,8 +364,8 @@ export function rankJobs(world: World, v: Villager): Choice[] {
     let base = Math.max(methodNeed(m, needs), floor(m.job)) * (m.facility ? 1.25 : m.id === 'canoe-fishing' ? 1.5 : 1) * crowd(m.id);
     // A building only has places for so many.
     if (m.facility) {
-      const places = (provided.get(m.facility) ?? []).reduce((n, st) => n + (tierOf(st)?.workers ?? 1), 0);
-      if (places && (doing.get(m.id) ?? 0) >= places) base *= 0.15;
+      const room = (provided.get(m.facility) ?? []).reduce((n, st) => n + places(st), 0);
+      if (room && (doing.get(m.id) ?? 0) >= room) base *= 0.15;
     }
     if (base <= 0) continue;
     out.push({ job: m.job, score: weigh(m.job, base), method: m.id });
@@ -376,14 +383,54 @@ export function rankJobs(world: World, v: Villager): Choice[] {
     const fits = passionJobs.includes(l.job) || passionJobs.includes('builder') ? 0.15 : 0;
     out.push({ job: 'builder', score: weigh('builder', 0.55 + fits), site: st.id });
   }
+  // Fields being cleared need hands: trees to fell, brush to cut, rocks to carry off.
+  for (const st of world.structures) {
+    if (!st.field || st.tier < 0 || !st.field.clear.length) continue;
+    const at = world.villagers.filter((o) => o !== v && o.task?.kind === 'clear' && o.task.structure === st.id).length;
+    if (at >= Math.min(4, st.field.clear.length)) continue;
+    const l = lineOf(st);
+    out.push({ job: l.job, score: weigh(l.job, st.field.planted ? 0.5 : 0.7), clear: st.id });
+  }
   out.sort((a, b) => b.score - a.score);
   return out;
+}
+
+/** The nearest thing still to be cleared in a field that nobody else is on. */
+function nextToClear(world: World, v: Villager, st: Structure): number | null {
+  const taken = new Set(world.villagers.filter((o) => o !== v && o.task?.kind === 'clear').map((o) => (o.task as { prop: number }).prop));
+  let best: number | null = null;
+  let bestD = Infinity;
+  for (const i of st.field!.clear) {
+    if (taken.has(i)) continue;
+    const p = world.props[i];
+    const d = Math.hypot(p.x - v.x, p.z - v.z);
+    if (d < bestD) {
+      bestD = d;
+      best = i;
+    }
+  }
+  return best;
+}
+
+function startClearing(world: World, v: Villager, st: Structure): boolean {
+  const i = nextToClear(world, v, st);
+  if (i === null) return false;
+  const p = world.props[i];
+  const spot = world.nav.nearestPassable(p.x + 0.9, p.z + 0.4) ?? { x: p.x, z: p.z };
+  v.task = { kind: 'clear', structure: st.id, prop: i, stage: 'going', spot };
+  if (!startPath(world, v, spot)) {
+    // Out of reach: give it up as cleared rather than stall the field for ever.
+    st.field!.clear = st.field!.clear.filter((x) => x !== i);
+    v.task = null;
+    return false;
+  }
+  return true;
 }
 
 function stationFor(world: World, recipe: Recipe): { spot: { x: number; z: number }; face: { x: number; z: number }; structure?: number } | null {
   const c = world.camp;
   if (!CAMP_FACILITIES.has(recipe.facility)) {
-    const at = (providedFacilities(world).get(recipe.facility) ?? []).find((s) => workersAt(world, s.id) < Math.max(1, tierOf(s)?.workers ?? 1));
+    const at = (providedFacilities(world).get(recipe.facility) ?? []).find((s) => workersAt(world, s.id) < places(s));
     if (!at) return null;
     const a = world.rng.next() * Math.PI * 2;
     const spot = world.nav.nearestPassable(at.x + Math.cos(a) * 2.5, at.z + Math.sin(a) * 2.5) ?? { x: at.x, z: at.z };
@@ -439,7 +486,7 @@ function chooseTarget(world: World, m: AcquisitionMethod, needs: Record<string, 
 
   // Facility methods are worked at the building that provides them.
   if (m.facility) {
-    const at = (providedFacilities(world).get(m.facility) ?? []).find((s) => workersAt(world, s.id) < Math.max(1, tierOf(s)?.workers ?? 1));
+    const at = (providedFacilities(world).get(m.facility) ?? []).find((s) => workersAt(world, s.id) < places(s));
     if (!at) return null;
     const a = world.rng.next() * Math.PI * 2;
     const spot = world.nav.nearestPassable(at.x + Math.cos(a) * 3, at.z + Math.sin(a) * 3);
@@ -550,6 +597,7 @@ function decide(world: World, v: Villager): void {
       const t = chooseTarget(world, m, needs);
       if (!t) continue;
       v.task = { kind: 'gather', method: m.id, target: t.target, stage: 'going', spot: t.spot, water: t.water, attempts: 0 };
+      if (t.target.type === 'structure') v.work = t.target.id;
       v.job = m.job;
       if (!startPath(world, v, t.spot)) {
         v.task = null;
@@ -564,8 +612,15 @@ function decide(world: World, v: Villager): void {
       // Reserve the inputs now so two villagers don't use the same materials.
       for (const [id, q] of Object.entries(r.inputs)) world.stockpile[id] = stock(world, id) - q;
       v.task = { kind: 'process', recipe: r.id, stage: 'going', spot: st.spot, face: st.face, structure: st.structure };
+      if (st.structure !== undefined) v.work = st.structure;
       v.job = recipeJob(r);
       startPath(world, v, st.spot);
+      return;
+    }
+    if (choice.clear !== undefined) {
+      const st = world.structures.find((x) => x.id === choice.clear);
+      if (!st?.field || !startClearing(world, v, st)) continue;
+      v.job = choice.job;
       return;
     }
     if (choice.site !== undefined) {
@@ -634,7 +689,8 @@ function addXp(v: Villager, job: JobId, amount: number): void {
 
 let toolWork = 1;
 function workSeconds(v: Villager, job: JobId, base: number): number {
-  return (base * (1 - Math.min(0.5, level(v.skills[job] ?? 0) * 0.025))) / toolWork;
+  // Poor rest in a noisy home slows the day's work.
+  return (base * (1 - Math.min(0.5, level(v.skills[job] ?? 0) * 0.025))) / toolWork / (0.75 + 0.25 * (v.rest ?? 1));
 }
 
 function headHome(world: World, v: Villager): void {
@@ -735,6 +791,31 @@ export function stepVillager(world: World, v: Villager, dt: number): void {
       }
       return;
     }
+    case 'clear': {
+      const st = world.structures.find((x) => x.id === task.structure);
+      if (!st?.field || !st.field.clear.includes(task.prop)) {
+        v.task = null;
+        return;
+      }
+      const p = world.props[task.prop];
+      if (task.stage === 'going') {
+        task.stage = 'working';
+        v.timer = workSeconds(v, lineOf(st).job, CLEARING[p.kind]?.seconds ?? 15);
+      }
+      v.activity = 'gathering';
+      face(v, p.x, p.z);
+      v.timer -= dt;
+      if (v.timer > 0) return;
+      clearProp(world, task.prop);
+      st.field.clear = st.field.clear.filter((x) => x !== task.prop);
+      world.structuresVersion++;
+      addXp(v, lineOf(st).job, 6);
+      if (!st.field.clear.length) {
+        plantField(world, st);
+        v.task = null;
+      } else if (!startClearing(world, v, st)) v.task = null;
+      return;
+    }
     case 'boat':
       boatStep(world, v, task, dt);
       return;
@@ -758,7 +839,11 @@ export function stepVillager(world: World, v: Villager, dt: number): void {
         if (task.target.type === 'herd') fishCycle(world, v, m, world.herds[task.target.index]);
         else if (task.target.type === 'structure') {
           const at = world.structures.find((x) => x.id === (task.target as { id: number }).id);
-          if (at) facilityCycle(world, v, m, at);
+          if (!at) {
+            v.task = null; // the building is gone (worked out, or taken down)
+            return;
+          }
+          facilityCycle(world, v, m, at);
           // Work done at a building goes straight into the town's store.
           addXp(v, m.job, 8);
           gainInsight(world, v, m.id, m.job, level(v.skills[m.job] ?? 0), DOING[m.id] ?? `working at the ${tierOf(at!)?.name.toLowerCase() ?? 'workshop'}`);
@@ -1027,10 +1112,14 @@ function facilityCycle(world: World, v: Villager, m: AcquisitionMethod, at: Stru
       // The building's own hex first, then its neighbours.
       const near = world.hexes.filter((h) => Math.hypot(hexToWorld(h).x - at.x, hexToWorld(h).z - at.z) < 20);
       for (const [id, y] of Object.entries(m.yields)) {
-        let want = roll(y);
+        // A working yields mostly what it was sunk for, and a little of what lies with it.
+        let want = roll(at.deposit ? (id === at.deposit ? y * 1.5 : y * 0.25) : y);
         for (const h of near) {
           if (want <= 0) break;
-          want -= take(m.source === 'below' ? h.below : h.ground, id, want);
+          let got = take(m.source === 'below' ? h.below : h.ground, id, want);
+          if (got < want) got += take(m.source === 'below' ? h.ground : h.below, id, want - got);
+          want -= got;
+          at.worked = (at.worked ?? 0) + got;
         }
       }
       return;

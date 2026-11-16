@@ -1,3 +1,4 @@
+import { livingStats } from './living';
 import { EXPECTED_QUALITY, GOOD_BY_ID, GOOD_CATEGORIES } from './data/goods';
 // The simulation runs here, off the main thread, so heavy simulation never stalls rendering.
 
@@ -16,7 +17,7 @@ import { ACTIVITY_CODES, HERD_STRIDE, VILLAGER_STRIDE, VOYAGE_STRIDE, type FromS
 import { saveWorld } from './save';
 import { carryCategory, foodTotal, level } from './villagerAI';
 import { activeStorage } from './food';
-import { bestGoods, housingCapacity, lineOf, roadName, tierOf, underConstruction } from './town';
+import { structureName, bestGoods, housingCapacity, lineOf, roadName, tierOf, underConstruction } from './town';
 import { PRODUCTS as ITEM_NAMES } from './data/processing';
 import type { StructureView } from './protocol';
 import { calendar } from './time';
@@ -46,6 +47,7 @@ const GROUP_NAMES: Record<string, string> = {
 };
 
 function stats(w: World): Stats {
+  const living = livingStats(w);
   const stockpile = Object.entries(w.stockpile)
     .filter(([, q]) => q >= 1)
     .map(([id, qty]) => {
@@ -101,11 +103,14 @@ function stats(w: World): Stats {
         state = !s.supplied ? 'Waiting for materials' : `${pct}% built`;
         if (s.tier >= 0) state = `Upgrading: ${state.toLowerCase()}`;
       } else if (s.animals > 0) state = `Working · ${Math.floor(s.animals)} animals`;
-      return { name: tierOf(s)?.name ?? target.name, state, owner, workers };
+      return { name: s.tier >= 0 ? structureName(s) : target.name, state, owner, workers };
     }),
     population: w.villagers.length,
     housing: housingCapacity(w),
     roads: roadName(w),
+    streets: w.streets.filter((s) => s.kind !== 'lane').length,
+    homeNoise: living.noise,
+    walkToWork: living.walk,
     storage: activeStorage(w).map((s) => s.name),
     spoiledYesterday: w.spoilage.yesterday,
     goods: GOOD_CATEGORIES.map((c) => {
@@ -122,23 +127,29 @@ function structureViews(w: World): StructureView[] {
   return w.structures.map((s) => {
     const l = lineOf(s);
     const shown = l.tiers[s.target];
+    // A farm is drawn as a farmhouse of its age with its field beside it.
+    const modelOf = (t: typeof shown) => (s.field ? `farmstead-${t.era}` : t.model);
     return {
       id: s.id,
       line: s.line,
-      model: shown.model,
+      model: modelOf(shown),
       built: underConstruction(s) ? (s.supplied ? Math.min(0.999, s.progress / shown.seconds) : 0) : 1,
-      previous: underConstruction(s) && s.tier >= 0 ? l.tiers[s.tier].model : null,
+      previous: underConstruction(s) && s.tier >= 0 ? modelOf(l.tiers[s.tier]) : null,
       x: s.x,
       z: s.z,
       rot: s.rot,
       variant: s.variant,
       animals: Math.floor(s.animals),
+      deposit: s.deposit,
+      field: s.field && { x: s.field.x, z: s.field.z, w: s.field.w, d: s.field.d, rot: s.field.rot, kind: s.field.kind, planted: s.field.planted && s.tier >= 0, toClear: s.field.clear.length, era: eraIndex(l.tiers[Math.max(0, s.tier)].era), species: s.line === 'pasture' ? (s.tier >= 1 ? 'aurochs' : 'wild-goat') : undefined },
+      heap: s.deposit ? Math.min(4, Math.floor(Math.sqrt((s.worked ?? 0) / 60))) : 0,
     };
   });
 }
 
 let sentStructures = -1;
 let sentRoster = -1;
+let sentRoads = -1;
 let lastStructurePost = 0;
 
 /** What a material not yet understood looks like to the villagers. */
@@ -226,6 +237,7 @@ self.onmessage = (e: MessageEvent<ToSim>) => {
       lastWear = 0;
       sentStructures = -1;
       sentRoster = 0;
+      sentRoads = -1;
       break;
     }
     case 'setSpeed':
@@ -293,6 +305,10 @@ setInterval(() => {
     hb[o + 7] = speciesIndex(h.species);
   });
   // Newcomers must exist on the renderer before their positions arrive.
+  if (w.roadsVersion !== sentRoads) {
+    sentRoads = w.roadsVersion;
+    post({ type: 'streets', streets: w.streets });
+  }
   if (w.rosterVersion !== sentRoster) {
     sentRoster = w.rosterVersion;
     post({ type: 'roster', villagers: w.villagers.map((v) => ({ id: v.id, name: v.name, look: v.look })) });
@@ -321,8 +337,9 @@ setInterval(() => {
   }
   if (now - lastWear > 3000) {
     lastWear = now;
-    const data = w.nav.wear.slice();
-    const roads = w.nav.road.slice();
+    // Only well-trodden ground shows as a path; streets are drawn as their own ribbons.
+    const data = w.nav.wear.map((x) => Math.max(0, x - 0.3) * 1.3);
+    const roads = new Uint8Array(w.nav.road.length);
     post({ type: 'wear', n: w.nav.n, data, roads }, [data.buffer, roads.buffer]);
   }
 }, 1000 / TICK_HZ);

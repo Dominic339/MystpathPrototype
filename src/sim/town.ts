@@ -14,7 +14,10 @@ import { PASSION_JOBS, PASSIONS } from './data/jobs';
 import { MATERIAL_BY_ID } from './data/materials';
 import { RECIPES } from './data/processing';
 import { LINE_BY_ID, LINES, ROAD_TIERS, facilitiesAt, type Line, type Site, type Tier } from './data/structures';
-import { currentEra, knows, logEvent } from './discovery';
+import { currentEra, knows, logEvent, workable } from './discovery';
+import { FARMSTEAD_R, FIELD_LINES, fieldArea, inAnyField, layoutField, resizeFields, stampField, wantedArea, type Field } from './fields';
+import { homeOf, lineNoise, settleHomes } from './living';
+import { bestRoadTier, connectLane, distToStreets, extendStreets, findLot, foundPlan, improveStreets, type Zone } from './roads';
 import { HEX_SIZE, hexKey, hexToWorld, worldToHex as worldToHexLocal } from './hex';
 import { calendar } from './time';
 import { walkCost, type Villager, type World } from './world';
@@ -54,6 +57,12 @@ export interface Structure {
   animals: number;
   /** Game time the current construction was planned (stalled sites are abandoned). */
   plannedAt: number;
+  /** What a mine, quarry or pit was sunk for (it yields mostly this, and a little of what lies with it). */
+  deposit?: string;
+  /** How much has been dug out of it (its spoil heaps grow). */
+  worked?: number;
+  /** The fenced field of a farm, orchard or pasture. */
+  field?: Field;
 }
 
 /** Building sites at once: more hands, more sites. */
@@ -62,6 +71,17 @@ const PLAN_EVERY = 20;
 
 export function lineOf(s: Structure): Line {
   return LINE_BY_ID.get(s.line)!;
+}
+
+/** How many can work at a building at once: a field takes more hands the bigger it is. */
+export function places(s: Structure): number {
+  if (s.field) return Math.max(1, Math.min(14, Math.round(fieldArea(s.field) / 45)));
+  return Math.max(1, tierOf(s)?.workers ?? 1);
+}
+
+/** The ground a structure's building stands on (a farm's field is apart from this). */
+export function radiusOf(s: Structure): number {
+  return s.field ? FARMSTEAD_R : footprint(lineOf(s).tiers[Math.max(0, s.target)].model);
 }
 
 export function tierOf(s: Structure): Tier | null {
@@ -87,6 +107,8 @@ export function providedFacilities(world: World): Map<string, Structure[]> {
   const out = new Map<string, Structure[]>();
   for (const s of world.structures) {
     if (s.tier < 0) continue;
+    // A field yields nothing until it is cleared and planted.
+    if (s.field && !s.field.planted) continue;
     for (const f of facilitiesAt(lineOf(s), s.tier)) {
       if (!out.has(f)) out.set(f, []);
       out.get(f)!.push(s);
@@ -132,10 +154,47 @@ export function footprint(model: string): number {
   return FOOTPRINT[model] ?? 4.2;
 }
 
-function siteScore(world: World, site: Site, hexIndex: number): number {
+/** Lines sunk into a deposit: what each can dig, from its first tier's methods. */
+const DEPOSIT_LINES = new Set(['mine', 'quarry', 'sand-pit', 'sulfur', 'diggings', 'clay-pit', 'oil', 'gas']);
+function digs(l: Line): string[] {
+  return [...new Set(ACQUISITION.filter((m) => m.facility && l.tiers.some((t) => t.facilities.includes(m.facility!))).flatMap((m) => Object.keys(m.yields)))];
+}
+
+/** What is worth digging for in a hex, for a line: the best deposit and how good the hex is. */
+export function depositAt(world: World, l: Line, hexIndex: number, needs: Record<string, number>, only?: string): { score: number; deposit: string | null } {
+  const h = world.hexes[hexIndex];
+  let total = 0;
+  let best: string | null = null;
+  let bestV = 0;
+  for (const id of digs(l)) {
+    if (only && id !== only) continue;
+    const q = (h.below[id] ?? 0) + (h.ground[id] ?? 0);
+    if (q < 5 || !workable(world, id)) continue;
+    total += q;
+    const v = q * (0.15 + (needs[id] ?? 0));
+    if (v > bestV) {
+      bestV = v;
+      best = id;
+    }
+  }
+  return { score: best ? Math.min(1, 0.3 + total / 300) : 0, deposit: best };
+}
+
+/** The name people give a working: an iron mine, a marble quarry, a salt diggings. */
+export function structureName(s: Structure): string {
+  const t = lineOf(s).tiers[Math.max(0, s.tier >= 0 ? s.tier : s.target)];
+  if (!s.deposit) return t.name;
+  const what = (MATERIAL_BY_ID.get(s.deposit)?.name ?? s.deposit).replace(/ ore$/i, '').replace(/ \(.*\)$/, '');
+  const kind = s.line === 'mine' ? 'mine' : s.line === 'quarry' ? 'quarry' : s.line === 'oil' || s.line === 'gas' ? 'field' : s.line === 'sulfur' ? 'works' : s.line === 'diggings' ? 'diggings' : 'pit';
+  if (kind === 'pit' || kind === 'field' || s.line === 'sulfur') return t.name;
+  return `${what} ${t.name.toLowerCase().replace(/^(stone|mineral) /, '')}`;
+}
+
+function siteScore(world: World, site: Site, hexIndex: number, l?: Line, needs: Record<string, number> = {}, only?: string): number {
   const h = world.hexes[hexIndex];
   const env = h.env;
   if (env === 'river' || env === 'lake' || env === 'sea') return 0;
+  if (l && DEPOSIT_LINES.has(l.id)) return depositAt(world, l, hexIndex, needs, only).score;
   switch (site) {
     case 'camp':
       return env === 'meadow' || env === 'riverbank' || env === 'plains' ? 1 : 0.6;
@@ -153,6 +212,9 @@ function siteScore(world: World, site: Site, hexIndex: number): number {
       return (h.ground.clay ?? 0) > 0 ? 1 : (h.below.clay ?? 0) > 0 ? 0.6 : 0;
     case 'sand':
       return (h.ground.sand ?? 0) > 0 ? 1 : 0;
+    case 'sulfur':
+    case 'salts':
+      return 0;
     case 'peat':
       return (h.ground.peat ?? 0) > 0 ? 1 : 0;
     case 'tar':
@@ -165,14 +227,40 @@ function siteScore(world: World, site: Site, hexIndex: number): number {
   }
 }
 
-function clearAt(world: World, x: number, z: number, r: number, ignore?: Structure, near: World['props'] = world.props): boolean {
+/** How much the ground rises across a site. */
+export function relief(world: World, x: number, z: number, r: number): number {
   const t = world.terrain;
-  if (t.slope(x, z) > 0.45 || t.sample(x, z) < t.waterLevel + 0.3) return false;
+  let lo = t.sample(x, z);
+  let hi = lo;
+  for (let k = 0; k < 8; k++) {
+    const a = (k / 8) * Math.PI * 2;
+    const h = t.sample(x + Math.cos(a) * r * 0.75, z + Math.sin(a) * r * 0.75);
+    lo = Math.min(lo, h);
+    hi = Math.max(hi, h);
+  }
+  return hi - lo;
+}
+
+const blockerCache = new WeakMap<World, World['props']>();
+/** The things no builder will move: great boulders, spirit trees, wild hives. */
+function blockers(world: World): World['props'] {
+  let b = blockerCache.get(world);
+  if (!b) blockerCache.set(world, (b = world.props.filter((p) => BLOCKING.has(p.kind))));
+  return b;
+}
+
+function clearAt(world: World, x: number, z: number, r: number, ignore?: Structure, near: World['props'] = blockers(world)): boolean {
+  const t = world.terrain;
+  if (t.sample(x, z) < t.waterLevel + 0.3) return false;
+  // Buildings stand on footings on a slope, but only so steep a one: the rise across the
+  // site must stay within what a footing (or a little digging in) can take up.
+  if (relief(world, x, z, r) > 0.35 * r + 0.7) return false;
   for (const s of world.structures) {
     if (s === ignore) continue;
-    const other = footprint(lineOf(s).tiers[Math.max(0, s.target)].model);
-    if (Math.hypot(s.x - x, s.z - z) < r + other + 1.5) return false;
+    if (Math.hypot(s.x - x, s.z - z) < r + radiusOf(s) + 1.5) return false;
   }
+  if (inAnyField(world, x, z, r + 1, ignore)) return false;
+  if (world.streets.length && distToStreets(world, x, z) < r + 0.6) return false;
   const c = world.camp;
   if (Math.hypot(c.fire.x - x, c.fire.z - z) < 8 + r) return false;
   // Brush and trees can be cleared; boulders, spirit trees and hives cannot. Clearing
@@ -206,18 +294,41 @@ function clearSite(world: World, x: number, z: number, r: number): void {
 }
 
 /** Find a spot for a building of this line: the best-suited hex nearest the town centre. */
-export function findSite(world: World, l: Line, model: string): { x: number; z: number; rot: number; hex: string } | null {
+export function findSite(world: World, l: Line, model: string, needs: Record<string, number> = {}, only?: string): { x: number; z: number; rot: number; hex: string; deposit?: string } | null {
+  // A planned town builds along its streets: homes on the quiet side, noisy work on the
+  // other, stores and kitchens in the middle. A new street is laid when the lots run out.
+  if (world.plan && l.site === 'camp') {
+    const rr = FIELD_LINES[l.id] ? FARMSTEAD_R : footprint(model);
+    const zone: Zone = l.kind === 'housing' ? 'res' : lineNoise(l) >= 0.4 ? 'work' : 'centre';
+    const ok = (x: number, z: number) => clearAt(world, x, z, rr) && walkCost(world, x, z) < 150;
+    let lot = findLot(world, zone, rr, ok);
+    if (!lot && extendStreets(world, zone)) lot = findLot(world, zone, rr, ok);
+    if (lot) return { x: lot.x, z: lot.z, rot: lot.rot, hex: hexKey(worldToHexLocal(lot.x, lot.z)) };
+  }
   const camp = world.camp.center;
-  const r = footprint(model);
+  const r = (FIELD_LINES[l.id] ? FARMSTEAD_R : footprint(model));
   const ranked: { i: number; score: number }[] = [];
   for (let i = 0; i < world.hexes.length; i++) {
-    const s = siteScore(world, l.site, i);
+    const s = siteScore(world, l.site, i, l, needs, only);
     if (s <= 0) continue;
     const c = hexToWorld(world.hexes[i]);
     const d = Math.hypot(c.x - camp.x, c.z - camp.z);
     // The town spreads outward as it grows.
-    const maxD = l.site === 'camp' ? 50 + world.villagers.length * 1.5 : 125 + world.villagers.length;
+    // Workings go where the deposit is, even a long walk out.
+    const maxD = l.site === 'camp' ? 50 + world.villagers.length * 1.5 : DEPOSIT_LINES.has(l.id) ? 170 + world.villagers.length * 1.5 : 125 + world.villagers.length;
     if (d > maxD) continue;
+    // Farms belong on the edge of town with open land round them: not in among the
+    // houses, and not crowding one another.
+    if (FIELD_LINES[l.id]) {
+      const edge = 45 + world.villagers.length * 0.6;
+      let crowd = 0;
+      for (const o of world.structures) {
+        const od = Math.hypot(o.x - c.x, o.z - c.z);
+        if (od < 30) crowd += o.field ? 1.5 : 0.5;
+      }
+      ranked.push({ i, score: s / (1 + Math.abs(d - edge) / 30) / (1 + crowd) });
+      continue;
+    }
     ranked.push({ i, score: s / (1 + d / (l.site === 'camp' ? 15 : 40)) });
   }
   ranked.sort((a, b) => b.score - a.score);
@@ -246,10 +357,10 @@ export function findSite(world: World, l: Line, model: string): { x: number; z: 
       }
       if (!clearAt(world, x, z, r, undefined, near)) continue;
       // Villagers must be able to walk there from the town.
-      if (walkCost(world, x, z) > 150) continue;
+      if (walkCost(world, x, z) > (DEPOSIT_LINES.has(l.id) ? 230 : 150)) continue;
       // Face the town centre (or the water, for waterside buildings).
       const face = l.site === 'water' ? waterDirection(world, x, z) : Math.atan2(camp.x - x, camp.z - z);
-      return { x, z, rot: face, hex: key };
+      return { x, z, rot: face, hex: key, deposit: DEPOSIT_LINES.has(l.id) ? depositAt(world, l, i, needs, only).deposit ?? undefined : undefined };
     }
   }
   return null;
@@ -344,6 +455,11 @@ export function planTown(world: World, needs: Record<string, number>, dt: number
   world.planTimer -= dt;
   if (world.planTimer > 0) return;
   world.planTimer = PLAN_EVERY;
+  // A band that has grown into a village starts to plan its streets.
+  if (!world.plan && world.villagers.length >= 16 && bestRoadTier(world) >= 1) {
+    foundPlan(world);
+    if (world.plan) logEvent(world, 'The village laid out its first street, with lanes to its workings: homes to one side, workshops to the other.');
+  }
   const sites = world.structures.filter(underConstruction).length;
   if (sites >= maxSites(world)) return;
 
@@ -373,46 +489,74 @@ export function planTown(world: World, needs: Record<string, number>, dt: number
 
   // 3. New buildings: the most useful line the town has none of yet, or another of a
   //    busy one when more people want that work than it has places for.
-  const picks: { l: Line; u: number }[] = [];
+  const picks: { l: Line; u: number; only?: string }[] = [];
   for (const l of LINES) {
     if (l.kind === 'housing') continue;
     if (bestTier(world, l) < 0 || !canSupply(world, l.tiers[0])) continue;
     const have = world.structures.filter((s) => s.line === l.id);
     let u: number;
+    let only: string | undefined;
     if (!have.length) u = usefulness(world, l, needs);
+    else if (DEPOSIT_LINES.has(l.id) && !have.some(underConstruction) && have.every((s) => (s.worked ?? 0) > 20) && (only = missingDeposit(world, l, have, needs))) u = 0.7;
+    else if (DEPOSIT_LINES.has(l.id)) continue;
+    // A farm grows its field before the town starts another.
+    else if (FIELD_LINES[l.id] && have.some((s) => !s.field?.full && fieldArea(s.field!) < FIELD_LINES[l.id].max * 0.8)) continue;
     else {
       if (l.kind !== 'acquisition' && l.kind !== 'processing') continue;
       if (have.some(underConstruction) || have.length >= 1 + Math.floor(world.villagers.length / 10)) continue;
-      const places = have.reduce((n, s) => n + (tierOf(s)?.workers ?? 0), 0);
+      const room = have.reduce((n, s) => n + (s.tier >= 0 ? places(s) : 0), 0);
       const keen = world.villagers.filter((v) => PASSION_JOBS[v.passion].includes(l.job) || v.job === l.job).length;
       const wanted = l.tiers[0].facilities.some((f) => facilityOutputs(f).some((id) => (needs[id] ?? 0) > 0.6));
-      if (keen + (wanted ? 2 : 0) <= places) continue;
-      u = 0.45 + Math.min(0.3, (keen - places) * 0.1);
+      if (keen + (wanted ? 2 : 0) <= room) continue;
+      u = 0.45 + Math.min(0.3, (keen - room) * 0.1);
     }
-    if (u > 0) picks.push({ l, u });
+    if (u > 0) picks.push({ l, u, only });
   }
   // The most useful first; if there is nowhere to put it, the next.
   picks.sort((a, b) => b.u - a.u);
-  for (const { l } of picks.slice(0, 4)) {
+  for (const { l, only } of picks.slice(0, 4)) {
     // A second building of a line starts at the best tier the town knows.
     const tier = world.structures.some((s) => s.line === l.id) ? Math.max(0, bestTier(world, l)) : 0;
-    if (place(world, l, tier)) break;
+    if (place(world, l, tier, needs, only)) break;
   }
 }
 
-function place(world: World, l: Line, tier: number): boolean {
+/** Something the town badly wants that none of a line's workings sits on, but that lies within reach. */
+function missingDeposit(world: World, l: Line, have: Structure[], needs: Record<string, number>): string | undefined {
+  for (const id of digs(l).sort((a, b) => (needs[b] ?? 0) - (needs[a] ?? 0))) {
+    if ((needs[id] ?? 0) < 0.5 || !workable(world, id)) continue;
+    if (have.some((s) => s.deposit === id)) continue;
+    if (world.hexes.some((h, i) => (h.below[id] ?? 0) + (h.ground[id] ?? 0) >= 5 && Math.hypot(hexToWorld(h).x - world.camp.center.x, hexToWorld(h).z - world.camp.center.z) < 170 + world.villagers.length * 1.5 && i >= 0)) return id;
+  }
+  return undefined;
+}
+
+function place(world: World, l: Line, tier: number, needs: Record<string, number> = {}, only?: string): boolean {
   const model = l.tiers[tier].model;
-  const site = findSite(world, l, model);
+  const spec = FIELD_LINES[l.id];
+  let site = findSite(world, l, model, needs, only);
+  let field: Field | null = null;
+  if (spec) {
+    // A farm needs room for its field beside the farmhouse: try a few spots.
+    for (let k = 0; k < 4 && site && !field; k++) {
+      // Only where there is room to grow: twice the first field must fit.
+      const first = wantedArea(world, l.id, needs);
+      if (layoutField(world, site, spec.kind, first * 2.2, first * 2, onStreet(world))) field = layoutField(world, site, spec.kind, first, spec.min, onStreet(world));
+      if (!field) site = findSite(world, l, model, needs, only);
+    }
+    if (!field) return false;
+  }
   if (!site) return false;
   // A new building goes up at the first tier, then upgrades.
-  clearSite(world, site.x, site.z, footprint(model));
+  clearSite(world, site.x, site.z, spec ? FARMSTEAD_R : footprint(model));
   const s: Structure = {
     id: world.nextStructureId++, line: l.id, tier: -1, target: tier, progress: 0, supplied: false,
     x: site.x, z: site.z, rot: site.rot, hex: site.hex, variant: Math.floor(world.rng.next() * 4), owner: chooseOwner(world, l), animals: 0,
-    plannedAt: world.clock.totalSeconds,
+    plannedAt: world.clock.totalSeconds, deposit: site.deposit, worked: 0, field: field ?? undefined,
   };
   world.structures.push(s);
   world.structuresVersion++;
+  connectLane(world, s);
   return true;
 }
 
@@ -451,8 +595,36 @@ export function buildWork(world: World, s: Structure, seconds: number, builder: 
   if (t.storage && !world.built.includes(t.storage)) world.built.push(t.storage);
   const owner = world.villagers.find((v) => v.id === s.owner);
   logEvent(world, `${builder.name} finished the ${t.name.toLowerCase()}${owner ? `, run by ${owner.name}` : ''}.`);
+  if (s.field && !s.field.planted) {
+    if (s.field.clear.length) logEvent(world, `The ${t.name.toLowerCase()} is fenced: ${s.field.clear.length} trees, bushes and rocks must be cleared before planting.`);
+    else plantField(world, s);
+  }
   if (lineOf(s).kind === 'acquisition' && t.facilities.some((f) => ['pasture', 'pigsty', 'chicken-coop', 'cattle-pasture'].includes(f))) startHerd(world, s);
   return true;
+}
+
+/** A cleared field is planted (or stocked) and starts to yield. */
+export function plantField(world: World, s: Structure): void {
+  if (!s.field || s.field.planted) return;
+  s.field.planted = true;
+  world.structuresVersion++;
+  const what = s.field.kind === 'pasture' ? 'turned out to graze' : s.field.kind === 'orchard' ? 'planted with young trees' : 'ploughed and sown';
+  logEvent(world, `The field at the ${lineOf(s).tiers[Math.max(0, s.tier)].name.toLowerCase()} is cleared and ${what}.`);
+}
+
+/** Streets are kept clear of fields. */
+export function onStreet(world: World): (x: number, z: number) => boolean {
+  return (x, z) => world.nav.roadAt(x, z) > 0;
+}
+
+/** Buildings and planted fields as the walking map sees them: gone round, not through. */
+export function rebuildObstacles(world: World): void {
+  world.nav.obstacle.fill(1);
+  for (const s of world.structures) {
+    const l = lineOf(s);
+    if (l.kind !== 'port' && !l.id.includes('bridge')) world.nav.setBuilding(s.x, s.z, radiusOf(s) * 0.62);
+    if (s.field) stampField(world, s.field);
+  }
 }
 
 /** Kept animals start from wild ones caught nearby. */
@@ -472,13 +644,28 @@ function startHerd(world: World, s: Structure): void {
 // ------------------------------------------------------------------ daily life
 
 /** Once a day: kept herds grow, and newcomers join a prosperous band with room to sleep. */
-export function dailyTown(world: World, food: number): void {
+export function dailyTown(world: World, food: number, needs: Record<string, number> = {}): void {
   const day = calendar(world.clock.totalSeconds).dayIndex;
   if (day === world.lastTownDay) return;
   world.lastTownDay = day;
   // Roads and paths change how far things are: refresh the walking map.
   world.walkField = world.nav.distanceField(world.camp.center.x, world.camp.center.z);
   for (const s of world.structures) if (s.animals > 0 && s.animals < 12) s.animals += 1;
+  // A working whose deposit is dug out is abandoned (the town may sink another elsewhere).
+  for (const s of [...world.structures]) {
+    if (!s.deposit || s.tier < 0 || underConstruction(s) || (s.worked ?? 0) < 50) continue;
+    let left = 0;
+    for (const h of world.hexes) {
+      const c = hexToWorld(h);
+      if (Math.hypot(c.x - s.x, c.z - s.z) < 20) left += (h.below[s.deposit] ?? 0) + (h.ground[s.deposit] ?? 0);
+    }
+    if (left >= 5) continue;
+    logEvent(world, `The ${structureName(s).toLowerCase()} is worked out and was abandoned.`);
+    world.structures.splice(world.structures.indexOf(s), 1);
+    world.structuresVersion++;
+  }
+  improveStreets(world);
+  resizeFields(world, needs, onStreet(world), (text) => logEvent(world, text));
   homeLife(world);
   goodsLife(world);
   const people = world.villagers.length;
@@ -514,7 +701,7 @@ export function addNewcomer(world: World, at?: { x: number; z: number }): Villag
   const id = world.villagers.reduce((m, v) => Math.max(m, v.id), -1) + 1;
   const v: Villager = {
     id, name, passion: rng.pick(PASSIONS), talent: rng.pick(PASSIONS), prodigy: rng.next() < 0.08, look: id % 6, x: spot.x, z: spot.z, heading: 0, vx: 0, vz: 0,
-    activity: 'resting', hunger: 0.3, skills: {}, job: null, task: null, priorities: [], carrying: {}, path: [], timer: 2, tent: id,
+    activity: 'resting', hunger: 0.3, skills: {}, job: null, task: null, priorities: [], carrying: {}, path: [], timer: 2, tent: id, home: null, work: null, rest: 1,
     fulfilment: 0.5, insight: {}, discoveries: [], inspiredUntil: 0,
   };
   world.villagers.push(v);
@@ -527,37 +714,20 @@ function homes(world: World): Structure[] {
   return world.structures.filter((s) => s.line === 'housing' && s.tier >= 0).sort((a, b) => b.tier - a.tier || a.id - b.id);
 }
 
-/** The home a villager sleeps in (null = no bed: sleeps by the fire). */
-export function homeOf(world: World, v: Villager): Structure | null {
-  let slot = world.villagers.indexOf(v);
-  for (const h of homes(world)) {
-    const cap = tierOf(h)!.housing ?? 0;
-    if (slot < cap) return h;
-    slot -= cap;
-  }
-  return null;
-}
-
 /** Where a villager sleeps: just inside their home's door, or by the fire. */
 export function bedFor(world: World, v: Villager): { x: number; z: number } {
   const h = homeOf(world, v);
   if (!h) return { x: world.camp.fire.x + 2, z: world.camp.fire.z + 2 };
-  return { x: h.x + Math.sin(h.rot) * 1.2, z: h.z + Math.cos(h.rot) * 1.2 };
+  const out = radiusOf(h) * 0.62 + 1;
+  return { x: h.x + Math.sin(h.rot) * out, z: h.z + Math.cos(h.rot) * out };
 }
-
-/** How content a home makes people (by tier: tent, roundhouse, longhouse, …). */
-const HOME_COMFORT = [0.35, 0.6, 0.68, 0.74, 0.8, 0.82, 0.86, 0.95];
 
 /**
  * Daily: a better home makes people happier and having no bed makes them miserable.
  * Spare homes, worst first, are taken down; a band that stays miserable loses people.
  */
 function homeLife(world: World): void {
-  for (const v of world.villagers) {
-    const h = homeOf(world, v);
-    const comfort = h ? HOME_COMFORT[h.tier] : 0.1;
-    v.fulfilment = Math.max(0, Math.min(1, v.fulfilment + (comfort - 0.5) * 0.12));
-  }
+  settleHomes(world, (text) => logEvent(world, text));
   const people = world.villagers.length;
   const spare = housingCapacity(world) - people;
   // Only outdated homes (below the best the town can build) are taken down, and only when
@@ -645,6 +815,8 @@ export function foundTown(world: World): void {
 
 /** Busy footpaths are built up into the best road surface the town knows. */
 export function growRoads(world: World): void {
+  // Roads are planned now (roads.ts); feet only wear footpaths.
+  if (world.streets) return;
   let tier = 0;
   ROAD_TIERS.forEach((r, i) => {
     if (r.requires && knows(world, r.requires)) tier = i;

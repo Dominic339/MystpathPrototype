@@ -4,7 +4,8 @@
 import { PASSIONS, type Passion } from './data/jobs';
 import { stepHerds, type Herd } from './animals';
 import { DISCOVERIES } from './data/discoveries';
-import { dailyTown, foundTown, growRoads, planTown, supplySites, type Structure } from './town';
+import type { Street, TownPlan } from './roads';
+import { dailyTown, foundTown, growRoads, planTown, rebuildObstacles, supplySites, type Structure } from './town';
 import { stepVoyages, type Voyage } from './vehicles';
 import { foodTotal, spoilFood } from './food';
 import { NavGrid } from './pathfinding';
@@ -82,7 +83,12 @@ export interface World {
   planTimer: number;
   lastTownDay: number;
   /** Bumped when structures, the roster or the roads change, so the renderer knows to refresh. */
+  /** The planned streets and lanes, and the plan they follow (null while the band only wears footpaths). */
+  streets: Street[];
+  plan: TownPlan | null;
   structuresVersion: number;
+  /** The structures version the walking map's obstacles were last built from. */
+  obstacleVersion: number;
   rosterVersion: number;
   roadsVersion: number;
   roadTimer: number;
@@ -141,6 +147,9 @@ export function createWorld(seed: number): World {
       path: [],
       timer: rng.range(1, 6),
       tent: id,
+      home: null,
+      work: null,
+      rest: 1,
       fulfilment: 0.5,
     });
   }
@@ -170,7 +179,10 @@ export function createWorld(seed: number): World {
     nextStructureId: 1,
     planTimer: 30,
     lastTownDay: 0,
+    streets: [],
+    plan: null,
     structuresVersion: 0,
+    obstacleVersion: -1,
     rosterVersion: 0,
     roadsVersion: 0,
     roadTimer: 0,
@@ -225,7 +237,11 @@ export function tick(world: World, dt: number): void {
   spoilFood(world, season, dt);
   supplySites(world);
   planTown(world, materialNeeds(world), dt);
-  dailyTown(world, foodTotal(world));
+  if (world.obstacleVersion !== world.structuresVersion) {
+    world.obstacleVersion = world.structuresVersion;
+    rebuildObstacles(world);
+  }
+  dailyTown(world, foodTotal(world), materialNeeds(world));
   stepVoyages(world, dt);
   world.roadTimer -= dt;
   if (world.roadTimer <= 0) {

@@ -14,7 +14,7 @@ import * as THREE from 'three';
 import { hash01 } from '../sim/rng';
 import { color, jitter, limb, merge, mix, noise3, part } from './geom';
 import {
-  basket, blockPile, boxWalls, canoe, fenceRing, frame, gableEnds, gableRoof, logPile, pennant, pit, plots, pole, posts, pots, reedBundles, roofColor, smokeRack, wallColor,
+  basket, blockPile, boxWalls, canoe, fenceRing, frame, hut, gableEnds, gableRoof, logPile, pennant, pit, plots, pole, posts, pots, reedBundles, roofColor, smokeRack, wallColor,
   type Model, type TownStyle,
 } from './buildings';
 
@@ -488,7 +488,31 @@ function technoBody(r: number, h: number, v: number, crown = true): G[] {
 
 const m = (fn: Model): Model => fn;
 
+/** A farmhouse of each age: the building a farm, orchard or pasture is run from. */
+function farmstead(era: string): Model {
+  return (s, v) => {
+    switch (era) {
+      case 'stone':
+      case 'hunter-gatherer':
+        return merge([...hut(s, 1.7, 1.5, 1.8, v), basket(2.2, 1, s), basket(2.5, 0.4, s, 0.22), ...reedBundles(2, -2.3, 0.6, s)]);
+      case 'iron':
+        return merge([...ironBody(s, { w: 4, d: 3 }), basket(2.6, 1.2, s), ...logPile(3, 1, -2.7, 0.6, 1.4), ...pots(2, 2.4, -1, v)]);
+      case 'medieval':
+        return merge([...medievalBody(s, { w: 4.4, d: 3.2, roof: v % 2 ? 'thatch' : undefined }, v), ...barrels(2, 2.8, 1), basket(-2.8, 1.2, s)]);
+      case 'renaissance':
+        return merge([...renaissanceBody(s, { w: 4.2, d: 3.4, storeys: 1, chimneys: 1 }, v), ...barrels(3, 2.8, 0.6)]);
+      case 'industrial':
+        return merge([...industrialBody(s, { w: 4.2, d: 3.2 }, v), ...tank(0.7, 3.6, 2.4, -2.2, color('#9aa0a6'))]);
+      case 'modern':
+        return merge([...modernBody(s, { w: 4.2, d: 3.2, storeys: 1 }, v), ...tank(0.8, 4.4, 2.4, -2.4, color('#c8ccd0'))]);
+      default:
+        return merge(technoBody(1.7, 2.2, v));
+    }
+  };
+}
+
 export const LATER_MODELS: Record<string, Model> = {
+  ...Object.fromEntries(['stone', 'iron', 'medieval', 'renaissance', 'industrial', 'modern', 'techno-magic'].map((e) => [`farmstead-${e}`, farmstead(e)])),
   // ================================================================ Stone (late)
   'craft-workshop': m((s, v) => {
     const parts = [...posts(4, 3, 2, s), ...gableRoof(4, 3, 1.3, 2, s)];
@@ -497,7 +521,27 @@ export const LATER_MODELS: Record<string, Model> = {
     return merge(parts);
   }),
 
+  'sand-pit': m((s, v) => {
+    const sand = color('#d8c690');
+    const parts = [...pit(3, 0, 0, sand, color('#b8a878')), mound(1.3, 0.9, 3.6, 1.6, rough(sand, 0.06)), mound(1, 0.7, -3.4, 2, rough(color('#9a948a'), 0.1)), ...posts(2.6, 2, 1.8, s).map((g) => g.translate(-3, 0, -2.6)), ...gableRoof(2.6, 2, 0.9, 1.8, s).map((g) => g.translate(-3, 0, -2.6))];
+    parts.push(basket(2.2, -2.6, s), basket(2.7, -2.2, s, 0.22), beam(V(1, 0.1, -1), V(2.6, 0.5, -2.4), 0.25, s.wood));
+    void v;
+    return merge(parts);
+  }),
+
   // ================================================================ Iron
+  'sulfur-diggings': m((s, v) => {
+    const y = color('#d8c23a');
+    const parts = [...pit(2.4, 0, 0, y, color('#8a7a52')), mound(1.2, 0.8, 3, 1, rough(y, 0.08)), mound(0.8, 0.5, 2.2, 2.4, rough(y, 0.08)), ...posts(2.6, 2, 1.8, s).map((g) => g.translate(-3.2, 0, -1)), ...gableRoof(2.6, 2, 0.9, 1.8, s).map((g) => g.translate(-3.2, 0, -1))];
+    parts.push(...pots(3, -3.2, 1.6, v), basket(1.2, -2.8, s));
+    return merge(parts);
+  }),
+  'mineral-diggings': m((s, v) => {
+    const w = color('#e6e2d6');
+    const parts = [...pit(1.8, -1.4, 0.6, w, color('#a89e8a')), ...pit(1.4, 1.8, -0.8, color('#d8d0c0'), color('#a89e8a')), mound(1.1, 0.7, 3.4, 1.6, rough(w, 0.05)), ...posts(2.6, 2, 1.8, s).map((g) => g.translate(-3.4, 0, -2.4)), ...gableRoof(2.6, 2, 0.9, 1.8, s).map((g) => g.translate(-3.4, 0, -2.4))];
+    parts.push(basket(0.4, 2.8, s), ...pots(2, 3, -2.6, v));
+    return merge(parts);
+  }),
   longhouse: m((s, v) => {
     const w = 7 + (v % 2) * 0.8;
     const parts = ironBody(s, { w, d: 4 });
@@ -968,6 +1012,19 @@ export const LATER_MODELS: Record<string, Model> = {
   'poultry-barn': m((s, v) => {
     const parts = industrialBody(s, { w: 7, d: 3.4 }, v);
     parts.push(...fenceRing(3, 10, s, 0.5, true).map((g) => g.translate(0, 0, 4)));
+    return merge(parts);
+  }),
+  'gravel-works': m((s, v) => {
+    const sand = color('#d8c690');
+    return merge([...pit(3.6, -1, 1, sand, color('#b8a878')), ...industrialBody(s, { w: 3.6, d: 3 }, v).map((g) => g.translate(4, 0, -2)), beam(V(0, 0.3, 0.5), V(3, 3, -1.4), 0.4, IRON), mound(1.6, 1.3, 3.4, 2.6, rough(sand, 0.06)), mound(1.4, 1.1, 0.6, -3.4, rough(color('#9a948a'), 0.1)), ...rails(6, -1, 5, 0)]);
+  }),
+  'sulfur-works': m((s, v) => {
+    const y = color('#d8c23a');
+    return merge([...industrialBody(s, { w: 4.4, d: 3.4 }, v), ...stack(3, -1.2, 6, 0.35, tones(s).brick), ...tank(0.8, 2, -3.4, -0.6, IRON), mound(1.6, 1.2, 3.6, 2.4, rough(y, 0.08)), mound(1.1, 0.8, -3, 2.6, rough(y, 0.08))]);
+  }),
+  'mineral-works': m((s, v) => {
+    const parts = [...industrialBody(s, { w: 4.4, d: 3.4 }, v).map((g) => g.translate(-2.6, 0, -1.6)), mound(1.4, 1, 3.6, -2.4, rough(color('#e6e2d6'), 0.05))];
+    for (let k = 0; k < 4; k++) parts.push(box(2, 0.2, 2, 1 + (k % 2) * 2.3, 0, 1 + Math.floor(k / 2) * 2.3, s.stone), box(1.8, 0.05, 1.8, 1 + (k % 2) * 2.3, 0.16, 1 + Math.floor(k / 2) * 2.3, k % 2 ? color('#ecebe6') : WATER));
     return merge(parts);
   }),
   cannery: m((s, v) => merge([...industrialBody(s, { w: 6.4, d: 4.6 }, v, true), ...stack(4, -1.8, 7, 0.38, tones(s).brick), ...crates(6, -4.4, 2, v)])),

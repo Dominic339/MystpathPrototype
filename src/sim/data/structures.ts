@@ -21,6 +21,8 @@ export type Site =
   | 'water' // at the water's edge, partly over it
   | 'clay' // where the ground holds clay
   | 'sand'
+  | 'sulfur' // sulfur vents and crusts (volcanic ground)
+  | 'salts' // saltpetre, borax, potash or rock salt in the ground
   | 'peat'
   | 'tar'
   | 'below' // over a deposit worth mining
@@ -104,9 +106,21 @@ export const LINES: readonly Line[] = [
     t('industrial', 'Rubber plantation', ['factory-system'], { planks: 10, 'iron-ingot': 4 }, 900, 'plantation', { speed: 3, workers: 4 }),
   ]),
   line('quarry', 'Quarry', 'acquisition', 'rocky', 'quarrier', [
-    t('stone', 'Stone quarry', ['quarrying'], { softwood: 6, 'stone-tools': 3, cordage: 2 }, 400, 'quarry', { facilities: ['quarry', 'sand-quarry'], workers: 4 }),
+    t('stone', 'Stone quarry', ['quarrying'], { softwood: 6, 'stone-tools': 3, cordage: 2 }, 400, 'quarry', { facilities: ['quarry'], workers: 4 }),
     t('iron', 'Quarry with cranes', ['timber-framing'], { lumber: 10, rope: 4, 'iron-ingot': 2 }, 700, 'quarry-crane', { speed: 1.6, workers: 6 }),
     t('industrial', 'Blasting quarry', ['steam-pumps'], { 'iron-ingot': 10, gunpowder: 6 }, 900, 'quarry-blast', { speed: 3, workers: 8 }),
+  ]),
+  line('sand-pit', 'Sand pit', 'acquisition', 'sand', 'digger', [
+    t('stone', 'Sand and gravel pit', ['quarrying'], { softwood: 4, 'stone-tools': 2 }, 250, 'sand-pit', { facilities: ['sand-quarry'], workers: 3 }),
+    t('industrial', 'Gravel works', ['steam-pumps'], { 'iron-ingot': 8, bricks: 10 }, 800, 'gravel-works', { speed: 3, workers: 6 }),
+  ]),
+  line('sulfur', 'Sulfur works', 'acquisition', 'sulfur', 'digger', [
+    t('iron', 'Sulfur diggings', ['mining'], { lumber: 6, 'stone-tools': 2 }, 400, 'sulfur-diggings', { facilities: ['sulfur-works'], workers: 3 }),
+    t('industrial', 'Sulfur works', ['steam-pumps'], { bricks: 20, 'iron-ingot': 6 }, 900, 'sulfur-works', { speed: 3, workers: 6 }),
+  ]),
+  line('diggings', 'Mineral diggings', 'acquisition', 'salts', 'digger', [
+    t('iron', 'Mineral diggings', ['mining'], { lumber: 6, 'stone-tools': 2 }, 400, 'mineral-diggings', { facilities: ['mineral-pit'], workers: 3 }),
+    t('industrial', 'Mineral works', ['steam-pumps'], { bricks: 20, 'iron-ingot': 6 }, 900, 'mineral-works', { speed: 3, workers: 6 }),
   ]),
   line('clay-pit', 'Clay pit', 'acquisition', 'clay', 'digger', [
     t('stone', 'Clay pit', ['clay-working'], { softwood: 4, 'stone-tools': 1 }, 250, 'clay-pit', { facilities: ['clay-pit'] }),

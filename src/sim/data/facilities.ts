@@ -26,6 +26,8 @@ export const FACILITIES: readonly Facility[] = [
   f('tapping-grove', 'Tapping grove', 'acquisition', 'stone', 'tapper', 1, 2),
   f('quarry', 'Quarry', 'acquisition', 'stone', 'quarrier', 2, 6),
   f('sand-quarry', 'Sand quarry', 'acquisition', 'stone', 'digger', 1, 4),
+  f('sulfur-works', 'Sulfur works', 'acquisition', 'iron', 'digger', 1, 3),
+  f('mineral-pit', 'Mineral diggings', 'acquisition', 'iron', 'digger', 1, 3),
   f('clay-pit', 'Clay pit', 'acquisition', 'stone', 'digger', 1, 3),
   f('peat-cutting', 'Peat cutting', 'acquisition', 'stone', 'digger', 1, 3),
   f('mine', 'Mine', 'acquisition', 'iron', 'miner', 1, 8),

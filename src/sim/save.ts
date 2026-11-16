@@ -7,7 +7,7 @@ import type { World } from './world';
 import { buildWorld } from './worldgen';
 import { NavGrid } from './pathfinding';
 
-export const SAVE_VERSION = 8;
+export const SAVE_VERSION = 9;
 
 export interface SaveFile {
   version: number;
@@ -28,6 +28,8 @@ export interface SaveFile {
   structures: World['structures'];
   living: World['living'];
   cleared: number[];
+  streets?: World['streets'];
+  plan?: World['plan'];
   voyages: World['voyages'];
   town: { nextStructureId: number; planTimer: number; lastTownDay: number; roadTimer: number };
   roads: string;
@@ -62,6 +64,8 @@ export function saveWorld(world: World): SaveFile {
     structures: world.structures,
     living: world.living,
     cleared: world.cleared,
+    streets: world.streets,
+    plan: world.plan,
     voyages: world.voyages,
     town: { nextStructureId: world.nextStructureId, planTimer: world.planTimer, lastTownDay: world.lastTownDay, roadTimer: world.roadTimer },
     roads: btoa(String.fromCharCode(...world.nav.road)),
@@ -106,8 +110,11 @@ export function loadWorld(save: SaveFile): World {
     structures: clone(save.structures),
     living: clone(save.living ?? {}),
     cleared: [...(save.cleared ?? [])],
+    streets: clone(save.streets ?? []),
+    plan: clone(save.plan ?? null),
     ...save.town,
     structuresVersion: 1,
+    obstacleVersion: -1,
     slowTimer: 0,
     rosterVersion: 1,
     roadsVersion: 1,
@@ -117,7 +124,7 @@ export function loadWorld(save: SaveFile): World {
     waterNav: new NavGrid(terrain, 'water'),
     walkField: nav.distanceField(save.camp?.center?.x ?? 0, save.camp?.center?.z ?? 0),
     voyages: clone(save.voyages),
-    villagers: clone(save.villagers),
+    villagers: clone(save.villagers).map((v) => ({ ...v, home: v.home ?? null, work: v.work ?? null, rest: v.rest ?? 1 })),
   };
 }
 

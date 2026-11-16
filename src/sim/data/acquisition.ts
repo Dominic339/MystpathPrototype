@@ -69,6 +69,8 @@ export const ACQUISITION: readonly AcquisitionMethod[] = [
   a('logging', 'Logging', 'woodcutter', 'stone', 'logging-camp', 'plant', 60, { softwood: 6, hardwood: 5, bamboo: 6, cork: 2 }, { requires: ['stone-axes'] }),
   a('tapping', 'Tapping', 'tapper', 'stone', 'tapping-grove', 'plant', 60, { resin: 4, latex: 4 }, { requires: ['resin-tapping'] }),
   a('quarrying', 'Quarrying', 'quarrier', 'stone', 'quarry', 'below', 60, { stone: 8, limestone: 8, sandstone: 8, marble: 4, slate: 6, basalt: 6, chalk: 8, gypsum: 6, feldspar: 4, kaolin: 4, flint: 4 }, { requires: ['quarrying'] }),
+  a('sulfur-digging', 'Digging sulfur', 'digger', 'iron', 'sulfur-works', 'ground', 60, { sulfur: 8, pumice: 3 }, { requires: ['mining'] }),
+  a('mineral-digging', 'Digging salts and minerals', 'digger', 'iron', 'mineral-pit', 'ground', 60, { saltpeter: 6, borax: 6, potash: 6, 'rock-salt': 6, gypsum: 4 }, { requires: ['mining'] }),
   a('sand-quarrying', 'Sand quarrying', 'digger', 'stone', 'sand-quarry', 'below', 60, { sand: 12, gravel: 12, silt: 8 }, { requires: ['quarrying'] }),
   a('clay-digging', 'Clay digging', 'digger', 'stone', 'clay-pit', 'below', 60, { clay: 10, kaolin: 6 }, { requires: ['clay-working'] }),
   a('peat-cutting', 'Peat cutting', 'digger', 'stone', 'peat-cutting', 'below', 60, { peat: 10 }, { requires: ['peat-cutting'] }),

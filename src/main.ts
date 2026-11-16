@@ -30,6 +30,7 @@ import { buildBoat, canoeGeometry, type BoatMode, type BoatView } from './render
 import { natureMaterial } from './render/materials';
 import { buildSky, skyState } from './render/sky';
 import { LINES } from './sim/data/structures';
+import { buildRoads, type RoadsView } from './render/roads';
 import { buildVegetation, type Vegetation } from './render/vegetation';
 import { buildGrass } from './render/grass';
 import { buildCamp, type CampBuild } from './render/camp';
@@ -204,6 +205,7 @@ let villagers: VillagerView | null = null;
 let animals: AnimalsView | null = null;
 let town: TownView | null = null;
 let vegetation: Vegetation | null = null;
+let roads: RoadsView | null = null;
 let gallery: StructureView[] | null = null;
 let hexOverlay: THREE.LineSegments | null = null;
 // Inventions only appear once the band has built them.
@@ -237,6 +239,8 @@ worker.onmessage = (e: MessageEvent<FromSim>) => {
     scene.add(animals.group);
     town = buildTown(terrain, townStyle(seed, params.has('style') ? Number(params.get('style')) : undefined));
     scene.add(town.group);
+    roads = buildRoads(terrain);
+    scene.add(roads.group);
     vegetation = buildVegetation(msg.props, terrain);
     scene.add(vegetation);
     if (params.has('gallery')) {
@@ -349,6 +353,8 @@ worker.onmessage = (e: MessageEvent<FromSim>) => {
     const l = msg.list.find((s) => s.model === 'landing' || s.previous === 'landing') ?? msg.list.find((s) => s.line === 'port');
     landingSpot = l && l.built >= 1 ? { x: l.x, z: l.z, rot: l.rot } : null;
     updateMoored();
+  } else if (msg.type === 'streets') {
+    roads?.set(msg.streets);
   } else if (msg.type === 'roster') {
     villagers?.setRoster(msg.villagers);
   } else if (msg.type === 'hexInfo') {
@@ -484,7 +490,8 @@ function renderPanel(): void {
     <div class="quiet">Food storage: ${st.storage.length ? st.storage.join(', ') : 'none yet (open air)'}</div>
     <h4>Goods in use</h4><ul>${goods}</ul>
     <h4>Discoveries</h4><ul>${disc}</ul>
-    <div class="quiet">People: ${st.population} · beds: ${st.housing} · roads: ${st.roads}${vehicles ? ` · boats and craft: ${vehicles}` : ''}</div>
+    <div class="quiet">People: ${st.population} · beds: ${st.housing} · roads: ${st.roads}${st.streets ? ` (${st.streets} streets)` : ''}${vehicles ? ` · boats and craft: ${vehicles}` : ''}</div>
+    <div class="quiet">At home: ${st.homeNoise < 0.08 ? 'quiet' : st.homeNoise < 0.25 ? 'some noise' : 'noisy'} (${Math.round(st.homeNoise * 100)}%) · walk to work: ${Math.round(st.walkToWork)} m</div>
     <h4>Buildings</h4><ul>${buildings}</ul>
     <h4>Chronicle</h4><ul class="chronicle">${events}</ul>
     <h3>People</h3>${people}<h3>Stockpile</h3>${stock}`;
