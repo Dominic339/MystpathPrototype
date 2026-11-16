@@ -10,7 +10,7 @@ import type { Structure } from './town';
 import type { Villager, World } from './world';
 
 const NOISE: Readonly<Record<string, number>> = {
-  housing: 0, 'food-store': 0.05, 'cold-store': 0.05, logging: 0.5, tapping: 0.1, quarry: 0.8, 'sand-pit': 0.5, sulfur: 0.6, diggings: 0.5, 'clay-pit': 0.3, peat: 0.2, tar: 0.3,
+  housing: 0, temple: 0, 'food-store': 0.05, 'cold-store': 0.05, logging: 0.5, tapping: 0.1, quarry: 0.8, 'sand-pit': 0.5, sulfur: 0.6, diggings: 0.5, 'clay-pit': 0.3, peat: 0.2, tar: 0.3,
   panning: 0.1, well: 0.05, mine: 0.8, oil: 0.8, gas: 0.7, brine: 0.1, ice: 0.2, hunting: 0.15, fishing: 0.1, farm: 0.1, 'fibre-farm': 0.1, 'herb-garden': 0, orchard: 0.05, spices: 0.05,
   mushrooms: 0, pasture: 0.25, pigsty: 0.35, coop: 0.25, apiary: 0.05, grove: 0, hearth: 0.1, smokehouse: 0.25, butcher: 0.3, woodwork: 0.5, masonry: 0.6, pottery: 0.35, charcoal: 0.5,
   smelting: 0.8, 'mana-forge': 0.5, glass: 0.5, tanning: 0.6, weaving: 0.2, ropewalk: 0.2, dye: 0.4, herbalist: 0, chandlery: 0.2, saltworks: 0.3, mill: 0.4, gems: 0.15, chemistry: 0.7,

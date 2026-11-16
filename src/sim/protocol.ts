@@ -4,7 +4,7 @@ import { ACTIVITIES } from './villagerAI';
 import type { CampLayout, PropInstance } from './world';
 
 export type ToSim =
-  | { type: 'init'; seed: number; startSeconds?: number; speed?: number; warmup?: number }
+  | { type: 'init'; seed: number; startSeconds?: number; speed?: number; warmup?: number; grant?: 'all' | string[] }
   | { type: 'setSpeed'; speed: number }
   | { type: 'setTime'; totalSeconds: number }
   | { type: 'inspectHex'; q: number; r: number }
@@ -120,7 +120,7 @@ export type FromSim =
   | { type: 'stats'; stats: Stats }
   | { type: 'wear'; n: number; data: Float32Array; roads: Uint8Array }
   | { type: 'structures'; list: StructureView[]; cleared: number[] }
-  | { type: 'streets'; streets: { ax: number; az: number; bx: number; bz: number; kind: 'main' | 'side' | 'lane'; tier: number }[] }
+  | { type: 'streets'; streets: { ax: number; az: number; bx: number; bz: number; kind: 'main' | 'side' | 'lane'; tier: number; chain?: number }[] }
   | { type: 'roster'; villagers: { id: number; name: string; look: number }[] }
   | { type: 'hexInfo'; info: HexInfo | null }
   | { type: 'saved'; json: string };

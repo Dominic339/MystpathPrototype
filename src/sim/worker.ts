@@ -216,6 +216,11 @@ self.onmessage = (e: MessageEvent<ToSim>) => {
     case 'init': {
       world = createWorld(msg.seed);
       // Optional warm-up so villagers have spread out before the first frame.
+      if (msg.grant === 'all') grantAll(world);
+      else for (const id of msg.grant ?? []) {
+        const d = DISCOVERY_BY_ID.get(id);
+        if (d) makeDiscovery(world, d, null);
+      }
       for (let s = 0; s < (msg.warmup ?? 0); s += MAX_STEP) tick(world, MAX_STEP);
       if (msg.startSeconds !== undefined) world.clock.totalSeconds = msg.startSeconds;
       if (msg.speed !== undefined) world.clock.speed = msg.speed;

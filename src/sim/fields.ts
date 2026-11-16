@@ -34,7 +34,7 @@ export const FIELD_LINES: Readonly<Record<string, { kind: FieldKind; outputs: st
 };
 
 /** The farmhouse's own footprint. */
-export const FARMSTEAD_R = 3.2;
+export const FARMSTEAD_R = 3.6;
 
 /** Things that cannot be cleared away: a field must go round them. */
 const SACRED = new Set(['spirit', 'beehive']);

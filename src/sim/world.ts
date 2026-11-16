@@ -86,6 +86,10 @@ export interface World {
   /** The planned streets and lanes, and the plan they follow (null while the band only wears footpaths). */
   streets: Street[];
   plan: TownPlan | null;
+  nextChain: number;
+  /** Streets laid today (and which day that is). */
+  streetDay: number;
+  streetsToday: number;
   structuresVersion: number;
   /** The structures version the walking map's obstacles were last built from. */
   obstacleVersion: number;
@@ -181,6 +185,9 @@ export function createWorld(seed: number): World {
     lastTownDay: 0,
     streets: [],
     plan: null,
+    nextChain: 1,
+    streetDay: -1,
+    streetsToday: 0,
     structuresVersion: 0,
     obstacleVersion: -1,
     rosterVersion: 0,

@@ -367,8 +367,10 @@ worker.onmessage = (e: MessageEvent<FromSim>) => {
     a.click();
   }
 };
-send({ type: 'init', seed, startSeconds, speed: startSpeed, warmup: num('warm', 0) });
-if (params.has('discover')) send({ type: 'grantDiscoveries', ids: params.get('discover') === 'all' ? 'all' : params.get('discover')!.split(',') });
+// With a warm-up, discoveries are granted before it so the warm-up plays out with them.
+const grant = params.has('discover') ? (params.get('discover') === 'all' ? ('all' as const) : params.get('discover')!.split(',')) : undefined;
+send({ type: 'init', seed, startSeconds, speed: startSpeed, warmup: num('warm', 0), grant: num('warm', 0) > 0 ? grant : undefined });
+if (params.has('discover') && !(num('warm', 0) > 0)) send({ type: 'grantDiscoveries', ids: params.get('discover') === 'all' ? 'all' : params.get('discover')!.split(',') });
 
 // ---------- input ----------
 const SPEEDS = [0, 1, 10, 60];

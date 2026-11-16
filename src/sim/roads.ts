@@ -9,7 +9,7 @@ import { ROAD_TIERS } from './data/structures';
 import { knows } from './discovery';
 import { clearProp, inAnyField } from './fields';
 import { lineNoise, noiseAt, noiseOf } from './living';
-import { radiusOf, type Structure } from './town';
+import { frontOf, radiusOf, type Structure } from './town';
 import { walkCost, type World } from './world';
 
 export type Zone = 'res' | 'work' | 'centre';
@@ -23,7 +23,26 @@ export interface Street {
   kind: 'main' | 'side' | 'lane';
   /** Road surface (index into ROAD_TIERS). */
   tier: number;
+  /** Segments of one lane share a chain, so it is drawn as one smooth path. */
+  chain?: number;
+  /** The building a lane was laid for (it goes when the building does). */
+  owner?: number;
+  /** A street of the town grid: the grid nodes it joins (in half-block steps from the temple). */
+  g?: [number, number, number, number];
 }
+
+/** The town's grid, laid out round the temple. */
+export interface Grid {
+  /** The temple (the middle of the square). */
+  x: number;
+  z: number;
+  /** One axis of the grid (unit vector); the other is at right angles. */
+  ux: number;
+  uz: number;
+}
+
+/** The length of a block's side: room for two rows of houses back to back. */
+export const BLOCK = 28;
 
 export interface TownPlan {
   /** Centre of the plan (beside the fire). */
@@ -32,6 +51,8 @@ export interface TownPlan {
   /** The way the working side of town lies (unit vector); homes lie the other way. */
   wx: number;
   wz: number;
+  /** Once the people build real houses: the grid of streets round the temple. */
+  grid?: Grid;
 }
 
 const WIDTH = { main: 3.4, side: 2.6, lane: 1.6 } as const;
@@ -63,6 +84,13 @@ export function distToStreets(world: World, x: number, z: number, lanes = true):
 
 /** Which side of town a spot is on. */
 export function zoneAt(plan: TownPlan, x: number, z: number): Zone {
+  if (plan.grid) {
+    const g = plan.grid;
+    const dx = x - g.x;
+    const dz = z - g.z;
+    if (dx * plan.wx + dz * plan.wz > BLOCK * 1.1) return 'work';
+    return Math.max(Math.abs(dx * g.ux + dz * g.uz), Math.abs(-dx * g.uz + dz * g.ux)) < BLOCK * 1.5 ? 'centre' : 'res';
+  }
   const along = (x - plan.cx) * plan.wx + (z - plan.cz) * plan.wz;
   return along > 10 ? 'work' : along < -4 ? 'res' : 'centre';
 }
@@ -253,16 +281,17 @@ export function extendStreets(world: World, zone: Zone): boolean {
  * A free lot on a street for a building of radius r, on the wanted side of town: beside the
  * street, facing it. Homes take the quietest lot; work takes the one nearest the middle.
  */
-export function findLot(world: World, zone: Zone, r: number, ok: (x: number, z: number) => boolean): { x: number; z: number; rot: number } | null {
+export function findLot(world: World, zone: Zone, r: number, front: number, ok: (x: number, z: number) => boolean): { x: number; z: number; rot: number } | null {
   const plan = world.plan;
   if (!plan) return null;
+  if (plan.grid) return gridLot(world, plan, plan.grid, zone, r, front, ok);
   let best: { x: number; z: number; rot: number; score: number } | null = null;
   for (const s of world.streets) {
     if (s.kind === 'lane') continue;
     const len = Math.hypot(s.bx - s.ax, s.bz - s.az);
     const ux = (s.bx - s.ax) / len;
     const uz = (s.bz - s.az) / len;
-    const off = streetWidth(s) / 2 + r + 1.1;
+    const off = streetWidth(s) / 2 + front + 1.3;
     for (let d = Math.min(r, len / 2); d <= len - Math.min(r, len / 2); d += 1.5) {
       for (const side of [1, -1]) {
         const x = s.ax + ux * d - uz * off * side;
@@ -272,7 +301,7 @@ export function findLot(world: World, zone: Zone, r: number, ok: (x: number, z: 
         const centre = Math.hypot(x - plan.cx, z - plan.cz);
         const score = zone === 'res' ? -noiseAt(world, x, z) * 60 - centre * 0.5 - (zn === 'centre' ? 12 : 0) : zone === 'work' ? -centre - (zn === 'centre' ? 20 : 0) : -centre;
         if (best && score <= best.score) continue;
-        if (distToStreets(world, x, z) < r + 0.6 || !ok(x, z)) continue;
+        if (!ok(x, z)) continue;
         // Face the street.
         best = { x, z, rot: Math.atan2(uz * side, -ux * side), score };
       }
@@ -299,38 +328,214 @@ function straighten(world: World, pts: { x: number; z: number }[], ignore?: Stru
   return out;
 }
 
-/** Join a building to the streets with a lane, along the way people would walk. */
-export function connectLane(world: World, s: Structure): void {
-  if (!world.plan || !world.streets.length) return;
-  const r = radiusOf(s);
-  const door = { x: s.x + Math.sin(s.rot) * (r * 0.62 + 1.4), z: s.z + Math.cos(s.rot) * (r * 0.62 + 1.4) };
-  if (distToStreets(world, door.x, door.z) < 6 || distToStreets(world, s.x, s.z) < r + 5) return;
-  // The nearest point on any street.
-  let goal: { x: number; z: number } | null = null;
-  let bestD = Infinity;
+/** Where a building's door opens. */
+export function doorOf(s: Structure): { x: number; z: number } {
+  const f = frontOf(s) + 0.25;
+  return { x: s.x + Math.sin(s.rot) * f, z: s.z + Math.cos(s.rot) * f };
+}
+
+/** The nearest point on any street's centre line. */
+function nearestOnStreets(world: World, x: number, z: number): { x: number; z: number; d: number } | null {
+  let goal: { x: number; z: number; d: number } | null = null;
   for (const st of world.streets) {
     const dx = st.bx - st.ax;
     const dz = st.bz - st.az;
-    const t = Math.max(0, Math.min(1, ((door.x - st.ax) * dx + (door.z - st.az) * dz) / (dx * dx + dz * dz || 1)));
+    const t = Math.max(0, Math.min(1, ((x - st.ax) * dx + (z - st.az) * dz) / (dx * dx + dz * dz || 1)));
     const p = { x: st.ax + dx * t, z: st.az + dz * t };
-    const d = Math.hypot(p.x - door.x, p.z - door.z);
-    if (d < bestD) {
-      bestD = d;
-      goal = p;
-    }
+    const d = Math.hypot(p.x - x, p.z - z);
+    if (!goal || d < goal.d) goal = { ...p, d };
   }
-  if (!goal || bestD > 260) return;
-  const path = world.nav.findPath(door.x, door.z, goal.x, goal.z);
-  if (!path || !path.length) return;
-  const pts = straighten(world, [door, ...path, goal], s);
+  return goal;
+}
+
+/**
+ * Join a building's door to the streets: a doorstep path straight across when it stands on
+ * a street, else a lane along the way people would walk, in a few clean runs.
+ */
+export function connectLane(world: World, s: Structure): void {
+  if (!world.plan || !world.streets.length) return;
+  const door = doorOf(s);
+  const goal = nearestOnStreets(world, door.x, door.z);
+  if (!goal || goal.d > 260 || goal.d < 0.4) return;
   const tier = Math.max(1, Math.min(bestRoadTier(world), 2));
+  const chain = world.nextChain++;
+  // Step out of the door before turning, so the path meets the door square on.
+  const step = { x: door.x + Math.sin(s.rot) * 1.6, z: door.z + Math.cos(s.rot) * 1.6 };
+  let pts: { x: number; z: number }[];
+  if (goal.d < 9) pts = [door, { x: goal.x, z: goal.z }];
+  else {
+    const path = world.nav.findPath(step.x, step.z, goal.x, goal.z);
+    if (!path || !path.length) return;
+    pts = [door, ...straighten(world, [step, ...path, { x: goal.x, z: goal.z }], s)];
+  }
   for (let k = 0; k < pts.length - 1; k++) {
-    if (Math.hypot(pts[k + 1].x - pts[k].x, pts[k + 1].z - pts[k].z) < 0.5) continue;
-    const lane: Street = { ax: pts[k].x, az: pts[k].z, bx: pts[k + 1].x, bz: pts[k + 1].z, kind: 'lane', tier };
+    if (Math.hypot(pts[k + 1].x - pts[k].x, pts[k + 1].z - pts[k].z) < 0.3) continue;
+    const lane: Street = { ax: pts[k].x, az: pts[k].z, bx: pts[k + 1].x, bz: pts[k + 1].z, kind: 'lane', tier, chain, owner: s.id };
     world.streets.push(lane);
     clearAlong(world, lane);
   }
   stampStreets(world);
+}
+
+// ------------------------------------------------------------------ the town grid
+
+function gridPoint(g: Grid, i: number, j: number): { x: number; z: number } {
+  return { x: g.x + (g.ux * i - g.uz * j) * BLOCK, z: g.z + (g.uz * i + g.ux * j) * BLOCK };
+}
+
+/** Good ground for a street of the grid (buildings are judged separately). */
+function gridGround(world: World, x: number, z: number): boolean {
+  const t = world.terrain;
+  const half = t.size / 2 - 6;
+  if (Math.abs(x) > half || Math.abs(z) > half) return false;
+  return t.sample(x, z) > t.waterLevel + 0.3 && t.slope(x, z) < 0.4 && world.nav.passable(x, z) && walkCost(world, x, z) < 220 && !inAnyField(world, x, z, 1);
+}
+
+/**
+ * Where to found the town: open, gentle ground near the old camp with room for blocks of
+ * streets all round. Returns the temple's spot and the grid's turn, or null.
+ */
+export function pickTownSite(world: World): Grid | null {
+  const fire = world.camp.fire;
+  let best: (Grid & { score: number }) | null = null;
+  for (let d = 30; d <= 100; d += 10)
+    for (let k = 0; k < 16; k++) {
+      const a = (k / 16) * Math.PI * 2;
+      const x = fire.x + Math.cos(a) * d;
+      const z = fire.z + Math.sin(a) * d;
+      if (!gridGround(world, x, z)) continue;
+      for (const turn of [0, Math.PI / 8, Math.PI / 4, (Math.PI * 3) / 8]) {
+        const g: Grid = { x, z, ux: Math.cos(turn), uz: Math.sin(turn) };
+        // Count the grid nodes and street middles that fall on good ground.
+        let good = 0;
+        for (let i = -2.5; i <= 2.5; i++) for (let j = -2.5; j <= 2.5; j++) {
+          const p = gridPoint(g, i, j);
+          if (gridGround(world, p.x, p.z)) good++;
+        }
+        // The square itself must be good, level ground.
+        let square = true;
+        for (const [i, j] of [[0.5, 0.5], [-0.5, 0.5], [0.5, -0.5], [-0.5, -0.5], [0, 0.5], [0.5, 0], [0, -0.5], [-0.5, 0], [0, 0]]) {
+          const p = gridPoint(g, i, j);
+          if (!gridGround(world, p.x, p.z) || Math.abs(world.terrain.sample(p.x, p.z) - world.terrain.sample(x, z)) > 2.2) square = false;
+        }
+        if (!square || good < 20) continue;
+        const score = good - d * 0.12;
+        if (!best || score > best.score) best = { ...g, score };
+      }
+    }
+  return best;
+}
+
+const gKey = (g: [number, number, number, number]) => (g[0] < g[2] || (g[0] === g[2] && g[1] < g[3]) ? g.join(',') : [g[2], g[3], g[0], g[1]].join(','));
+
+/** Lay the first streets of the grid: the square round the temple. Old streets become lanes' work. */
+export function layGrid(world: World, g: Grid): void {
+  const plan = world.plan ?? (world.plan = { cx: g.x, cz: g.z, wx: g.ux, wz: g.uz });
+  // The working side: toward the noisy buildings there already are, along the grid.
+  let wx = 0;
+  let wz = 0;
+  for (const s of world.structures) {
+    const n = noiseOf(s);
+    if (n < 0.3) continue;
+    const d = Math.hypot(s.x - g.x, s.z - g.z) || 1;
+    wx += ((s.x - g.x) / d) * n;
+    wz += ((s.z - g.z) / d) * n;
+  }
+  const along = wx * g.ux + wz * g.uz;
+  const across = -wx * g.uz + wz * g.ux;
+  if (Math.abs(along) >= Math.abs(across)) [plan.wx, plan.wz] = along >= 0 ? [g.ux, g.uz] : [-g.ux, -g.uz];
+  else [plan.wx, plan.wz] = across >= 0 ? [-g.uz, g.ux] : [g.uz, -g.ux];
+  plan.cx = g.x;
+  plan.cz = g.z;
+  plan.grid = g;
+  world.streets = [];
+  const tier = Math.max(1, bestRoadTier(world));
+  for (const seg of [[-0.5, -0.5, 0.5, -0.5], [0.5, -0.5, 0.5, 0.5], [0.5, 0.5, -0.5, 0.5], [-0.5, 0.5, -0.5, -0.5]] as [number, number, number, number][]) {
+    const a = gridPoint(g, seg[0], seg[1]);
+    const b = gridPoint(g, seg[2], seg[3]);
+    const st: Street = { ax: a.x, az: a.z, bx: b.x, bz: b.z, kind: 'main', tier, g: seg };
+    world.streets.push(st);
+    clearAlong(world, st);
+  }
+  stampStreets(world);
+}
+
+/**
+ * Add the next street of the grid on the wanted side of town: the free block side nearest
+ * the temple. Old buildings in its way (the huts of the old camp) are pulled down.
+ */
+export function gridExtend(world: World, zone: Zone, isOld: (s: Structure) => boolean, demolish: (s: Structure) => void): boolean {
+  const plan = world.plan;
+  const g = plan?.grid;
+  if (!plan || !g) return false;
+  const have = new Set(world.streets.filter((s) => s.g).map((s) => gKey(s.g!)));
+  const nodes = new Map<string, [number, number]>();
+  for (const s of world.streets) if (s.g) for (const n of [[s.g[0], s.g[1]], [s.g[2], s.g[3]]] as [number, number][]) nodes.set(n.join(','), n);
+  let best: { seg: [number, number, number, number]; score: number } | null = null;
+  for (const [i, j] of nodes.values())
+    for (const [di, dj] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      const seg: [number, number, number, number] = [i, j, i + di, j + dj];
+      if (have.has(gKey(seg))) continue;
+      if (Math.abs(i + di) > 6 || Math.abs(j + dj) > 6) continue;
+      const a = gridPoint(g, i, j);
+      const b = gridPoint(g, i + di, j + dj);
+      const mx = (a.x + b.x) / 2;
+      const mz = (a.z + b.z) / 2;
+      const zn = zoneAt(plan, mx, mz);
+      if (zone === 'work' ? zn !== 'work' : zone === 'res' ? zn === 'work' : false) continue;
+      let ok = true;
+      for (let d = 0; d <= BLOCK && ok; d += 2) {
+        const x = a.x + ((b.x - a.x) * d) / BLOCK;
+        const z = a.z + ((b.z - a.z) * d) / BLOCK;
+        if (!gridGround(world, x, z)) ok = false;
+        else for (const s of world.structures) if (!isOld(s) && Math.hypot(s.x - x, s.z - z) < radiusOf(s) + 1.8) ok = false;
+      }
+      if (!ok) continue;
+      // Nearest the temple first, and prefer finishing blocks (a street that joins two there already are).
+      const score = -Math.hypot(mx - g.x, mz - g.z) + (nodes.has([i + di, j + dj].join(',')) ? 10 : 0);
+      if (!best || score > best.score) best = { seg, score };
+    }
+  if (!best) return false;
+  const seg = (best as { seg: [number, number, number, number] }).seg;
+  const a = gridPoint(g, seg[0], seg[1]);
+  const b = gridPoint(g, seg[2], seg[3]);
+  // The two streets through the middle of the square's sides are the town's main streets.
+  const st: Street = { ax: a.x, az: a.z, bx: b.x, bz: b.z, kind: Math.abs(seg[0]) === 0.5 && Math.abs(seg[2]) === 0.5 || (Math.abs(seg[1]) === 0.5 && Math.abs(seg[3]) === 0.5) ? 'main' : 'side', tier: Math.max(1, bestRoadTier(world) - 1), g: seg };
+  for (const s of [...world.structures]) if (isOld(s) && distToSegment(s.x, s.z, st) < radiusOf(s) + streetWidth(st) / 2 + 0.6) demolish(s);
+  // Lanes that the new street replaces or cuts are relaid from the doors they serve.
+  world.streets.push(st);
+  clearAlong(world, st);
+  stampStreets(world);
+  return true;
+}
+
+/** A free lot on the grid: houses stand in rows, two to each side of a block's street, facing it. */
+function gridLot(world: World, plan: TownPlan, g: Grid, zone: Zone, r: number, front: number, ok: (x: number, z: number) => boolean): { x: number; z: number; rot: number } | null {
+  let best: { x: number; z: number; rot: number; score: number } | null = null;
+  const slots = r <= 6.2 ? [7.6, BLOCK - 7.6] : [BLOCK / 2];
+  for (const s of world.streets) {
+    if (!s.g) continue;
+    const ux = (s.bx - s.ax) / BLOCK;
+    const uz = (s.bz - s.az) / BLOCK;
+    const off = streetWidth(s) / 2 + front + 1.3;
+    for (const d of slots)
+      for (const side of [1, -1]) {
+        const x = s.ax + ux * d - uz * off * side;
+        const z = s.az + uz * d + ux * off * side;
+        // The square round the temple stays open.
+        const dx = x - g.x;
+        const dz = z - g.z;
+        if (Math.max(Math.abs(dx * g.ux + dz * g.uz), Math.abs(-dx * g.uz + dz * g.ux)) < BLOCK / 2) continue;
+        const zn = zoneAt(plan, x, z);
+        if (zone === 'work' ? zn !== 'work' : zone === 'res' ? zn === 'work' : zn === 'work') continue;
+        const centre = Math.hypot(dx, dz);
+        const score = zone === 'res' ? -noiseAt(world, x, z) * 60 - centre * 0.5 - (zn === 'centre' ? 25 : 0) : -centre;
+        if (best && score <= best.score) continue;
+        if (!ok(x, z)) continue;
+        best = { x, z, rot: Math.atan2(uz * side, -ux * side), score };
+      }
+  }
+  return best;
 }
 
 /** Daily: resurface a couple of streets with the best road the town now knows, main streets first. */

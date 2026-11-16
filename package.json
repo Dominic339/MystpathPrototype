@@ -1,14 +1,15 @@
 {
   "name": "mystpath",
   "version": "0.1.0",
-  "description": "Mystpath — a god game where you guide a living civilization through acts of god.",
+  "description": "Mystpath \u2014 a god game where you guide a living civilization through acts of god.",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview --port 4173 --strictPort",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "screenshot": "node scripts/screenshot.mjs"
+    "screenshot": "node scripts/screenshot.mjs",
+    "footprints": "npx --yes esbuild scripts/footprints.ts --bundle --platform=node --outfile=node_modules/.cache/fp.cjs --format=cjs --log-level=error && node node_modules/.cache/fp.cjs"
   },
   "repository": {
     "type": "git",

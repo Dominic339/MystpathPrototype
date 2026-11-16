@@ -300,7 +300,7 @@ export class NavGrid {
         const ii = i + di;
         const jj = j + dj;
         if (ii < 0 || jj < 0 || ii >= this.n || jj >= this.n || Math.hypot(di, dj) * NAV_CELL > r) continue;
-        this.obstacle[jj * this.n + ii] = 14;
+        this.obstacle[jj * this.n + ii] = 5;
       }
   }
 

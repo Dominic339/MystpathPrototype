@@ -529,6 +529,61 @@ export const LATER_MODELS: Record<string, Model> = {
     return merge(parts);
   }),
 
+  // ================================================================ Temples
+  'temple-timber': m((s, v) => {
+    // A great thatched hall on a stone platform, carved posts before its door.
+    const parts: G[] = [box(9.6, 0.7, 7.6, 0, -0.1, 0, stonePaint(s.stone)), box(3, 0.35, 1.2, 0, -0.1, 4.2, stonePaint(s.stone)), box(2.4, 0.2, 0.8, 0, -0.1, 5, stonePaint(s.stone))];
+    const lift = (g: G) => g.translate(0, 0.6, 0);
+    parts.push(...boxWalls(8, 6, 2.8, s, 1.6).map(lift), ...gableEnds(8, 6, 4.4, 2.8, s).map(lift), ...gableRoof(8, 6, 4.4, 2.75, s).map(lift));
+    for (const x of [-2.4, -1.1, 1.1, 2.4]) {
+      parts.push(part(limb(V(x, 0.6, 3.6), V(x, 4.2, 3.6), 0.18, 0.14, 7), s.wood), box(0.5, 0.3, 0.5, x, 4.2, 3.6, s.cloth));
+    }
+    parts.push(beam(V(-2.6, 4.3, 3.6), V(2.6, 4.3, 3.6), 0.22, s.wood), ...pennant(-4.2, 4.4, 5, s), ...pennant(4.2, 4.4, 5, s));
+    // A fire bowl before the steps.
+    parts.push(cyl(0.5, 0.35, 0.5, 0, 0, 6.2, stonePaint(s.stone), 10), cyl(0.38, 0.38, 0.12, 0, 0.45, 6.2, color('#e8902a'), 10));
+    void v;
+    return merge(parts);
+  }),
+  'temple-stone': m((s, v) => {
+    const t = tones(s);
+    const st = stonePaint(t.stone);
+    // A stone nave with a slate roof and a tower over the door.
+    const parts: G[] = [box(8, 0.5, 13, 0, -0.1, -1, st), box(6.4, 5, 10, 0, 0.4, -1.5, st, 1), ...roofSlabs(10, 6.4, 3.2, 5.4, t.roof, 0.3).map((g) => g.rotateY(Math.PI / 2).translate(0, 0, -1.5))];
+    parts.push(gableTri(6.4, 0.3, 0.01, 5.4, st), box(3.6, 9, 3.6, 0, 0.4, 4.4, st, 1), ...hipped(3.8, 3.8, 3.2, 9.4, t.roof, 0.2).map((g) => g.translate(0, 0, 4.4)), ...crystal(0, 12.6, 4.4, 1.2));
+    // Buttresses and tall windows down the sides.
+    for (let k = 0; k < 4; k++) for (const sx of [-1, 1]) {
+      parts.push(box(0.5, 3.6, 0.7, sx * 3.4, 0.4, -5.4 + k * 2.6, st), box(0.08, 2.4, 0.8, sx * 3.22, 1.8, -4.1 + k * 2.6, (p) => mix(color('#3a5a8a'), s.cloth, Math.abs(Math.sin(p.y * 3 + k)))));
+    }
+    parts.push(...door(0, 6.2, 1.5, 2.6, t.timber, t.stone).map((g) => g.translate(0, 0.4, 0)), box(3, 0.3, 1.4, 0, 0, 7, st));
+    void v;
+    return merge(parts);
+  }),
+  'temple-great': m((s, v) => {
+    const t = tones(s);
+    const pale = stonePaint(color('#ddd5c2'));
+    // A domed temple behind a columned porch, on broad steps.
+    const parts: G[] = [box(12, 0.4, 13, 0, -0.1, 0, pale), box(10.6, 0.4, 11.6, 0, 0.3, 0, pale), box(9, 5.6, 8, 0, 0.7, -1, rough(t.render, 0.04, 2), 1), box(9.4, 0.4, 8.4, 0, 6.3, -1, pale)];
+    parts.push(cyl(3, 3, 2, 0, 6.7, -1, pale, 20));
+    const dome = new THREE.SphereGeometry(3.1, 20, 10, 0, Math.PI * 2, 0, Math.PI / 2);
+    dome.translate(0, 8.7, -1);
+    parts.push(part(dome, roofPaint(color('#5f8a7a'))), ...crystal(0, 11.8, -1, 1.4));
+    for (let k = 0; k < 6; k++) parts.push(cyl(0.38, 0.44, 5.2, -4 + k * 1.6, 0.7, 4.2, pale, 12));
+    parts.push(box(9.6, 0.7, 2.4, 0, 5.9, 4.2, pale), gableTri(9.6, 2.4, 1.6, 6.6, pale).translate(0, 0, 4.2), ...door(0, 3, 1.8, 3.2, color('#5a3a2a'), color('#ddd5c2')).map((g) => g.translate(0, 0.7, 0)));
+    parts.push(...windows(9, 8, 0.7, 1, 5.6, color('#efe8da'), { spacing: 2.2, tall: 0.5, skipDoor: 9 }).map((g) => g.translate(0, 0, -1)));
+    void v;
+    return merge(parts);
+  }),
+  'temple-spire': m((s, v) => {
+    const parts = technoBody(4.2, 6, v, false);
+    parts.push(cyl(0.3, 2.6, 12, 0, 7, 0, rough(TECHNO, 0.03, 2), 20), ...seams(1.6, 10, 7, 4), ...crystal(0, 19.4, 0, 3), ring(3, 12, 0, 0, 0.1), ring(2, 16, 0, 0, 0.08), ring(4.8, 5, 0, 0, 0.08, CRYSTAL));
+    for (let k = 0; k < 6; k++) {
+      const a = (k / 6) * Math.PI * 2;
+      parts.push(...crystal(Math.cos(a) * 5.6, 0.4 + (k % 2) * 0.5, Math.sin(a) * 5.6, 1.4));
+    }
+    void s;
+    return merge(parts);
+  }),
+
   // ================================================================ Iron
   'sulfur-diggings': m((s, v) => {
     const y = color('#d8c23a');

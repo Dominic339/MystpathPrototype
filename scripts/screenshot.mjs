@@ -34,6 +34,7 @@ await new Promise((r) => setTimeout(r, 2500));
 const browser = await puppeteer.launch({
   executablePath: CHROME,
   headless: true,
+  protocolTimeout: 1500000,
   args: ['--no-sandbox', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist', `--window-size=${W},${H}`],
 });
 try {
@@ -46,7 +47,7 @@ try {
     page.on('pageerror', (e) => errors.push(String(e)));
     page.on('console', (m) => m.type() === 'error' && errors.push(m.text()));
     await page.goto(`http://localhost:${PORT}/?${query}`, { waitUntil: 'load' });
-    await page.waitForFunction('window.__mystReady === true', { timeout: 240000 });
+    await page.waitForFunction('window.__mystReady === true', { timeout: 900000 });
     await new Promise((r) => setTimeout(r, 1500));
     await page.screenshot({ path: `screenshots/${name}.png` });
     console.log(`saved screenshots/${name}.png${errors.length ? `  (errors: ${errors.join(' | ')})` : ''}`);

@@ -11,13 +11,14 @@ import { BASIC_NEEDS, EXPECTED_QUALITY, GOOD_CATEGORIES, GOODS, type GoodCategor
 import { eraIndex } from './data/eras';
 import { FAUNA_BY_ID } from './data/fauna';
 import { PASSION_JOBS, PASSIONS } from './data/jobs';
+import { MODEL_FRONT, MODEL_RADIUS } from './data/footprints';
 import { MATERIAL_BY_ID } from './data/materials';
 import { RECIPES } from './data/processing';
 import { LINE_BY_ID, LINES, ROAD_TIERS, facilitiesAt, type Line, type Site, type Tier } from './data/structures';
 import { currentEra, knows, logEvent, workable } from './discovery';
 import { FARMSTEAD_R, FIELD_LINES, fieldArea, inAnyField, layoutField, resizeFields, stampField, wantedArea, type Field } from './fields';
 import { homeOf, lineNoise, settleHomes } from './living';
-import { bestRoadTier, connectLane, distToStreets, extendStreets, findLot, foundPlan, improveStreets, type Zone } from './roads';
+import { bestRoadTier, BLOCK, connectLane, distToStreets, extendStreets, findLot, foundPlan, gridExtend, improveStreets, layGrid, pickTownSite, stampStreets, type Zone } from './roads';
 import { HEX_SIZE, hexKey, hexToWorld, worldToHex as worldToHexLocal } from './hex';
 import { calendar } from './time';
 import { walkCost, type Villager, type World } from './world';
@@ -63,6 +64,8 @@ export interface Structure {
   worked?: number;
   /** The fenced field of a farm, orchard or pasture. */
   field?: Field;
+  /** Stood before the town was laid out: part of the old camp, to be replaced in time. */
+  old?: boolean;
 }
 
 /** Building sites at once: more hands, more sites. */
@@ -151,7 +154,15 @@ const FOOTPRINT: Partial<Record<string, number>> = {
   'rail-station': 6.5, 'open-pit': 6, 'agri-complex': 6, 'assembly-plant': 6, 'container-port': 6.5, 'electric-station': 6.5, 'sky-dock': 5, 'sky-harbour': 6, maglev: 6.5,
 };
 export function footprint(model: string): number {
-  return FOOTPRINT[model] ?? 4.2;
+  // Measured from the model itself where it has been (see scripts/footprints.ts).
+  return MODEL_RADIUS[model] ?? FOOTPRINT[model] ?? 4.2;
+}
+
+/** How far in front of its centre a structure's front wall (and door) stands. */
+export function frontOf(s: Structure): number {
+  const t = lineOf(s).tiers[Math.max(0, s.target)];
+  const model = s.field ? `farmstead-${t.era}` : t.model;
+  return MODEL_FRONT[model] || radiusOf(s) * 0.5;
 }
 
 /** Lines sunk into a deposit: what each can dig, from its first tier's methods. */
@@ -241,6 +252,32 @@ export function relief(world: World, x: number, z: number, r: number): number {
   return hi - lo;
 }
 
+/** Is a street lot free? The lot is set out from the street, so only neighbours and the ground are checked. */
+function lotOk(world: World, x: number, z: number, r: number, front: number): boolean {
+  const t = world.terrain;
+  if (t.sample(x, z) < t.waterLevel + 0.3 || walkCost(world, x, z) > 200) return false;
+  if (relief(world, x, z, r) > 0.35 * r + 0.9) return false;
+  for (const s of world.structures) if (Math.hypot(s.x - x, s.z - z) < r + radiusOf(s) + 0.4) return false;
+  if (inAnyField(world, x, z, r + 1)) return false;
+  // Clear of every street but its own (which it fronts).
+  if (distToStreets(world, x, z) < front + 0.4) return false;
+  for (const p of blockers(world)) if (Math.hypot(p.x - x, p.z - z) < r + 1.5) return false;
+  return true;
+}
+
+/** Pull a building down (its lane goes with it). */
+export function demolish(world: World, s: Structure, why: string): void {
+  const i = world.structures.indexOf(s);
+  if (i < 0) return;
+  world.structures.splice(i, 1);
+  world.structuresVersion++;
+  if (world.streets.some((st) => st.owner === s.id)) {
+    world.streets = world.streets.filter((st) => st.owner !== s.id);
+    stampStreets(world);
+  }
+  logEvent(world, `The old ${lineOf(s).tiers[Math.max(0, s.tier)].name.toLowerCase()} was pulled down ${why}.`);
+}
+
 const blockerCache = new WeakMap<World, World['props']>();
 /** The things no builder will move: great boulders, spirit trees, wild hives. */
 function blockers(world: World): World['props'] {
@@ -300,9 +337,23 @@ export function findSite(world: World, l: Line, model: string, needs: Record<str
   if (world.plan && l.site === 'camp') {
     const rr = FIELD_LINES[l.id] ? FARMSTEAD_R : footprint(model);
     const zone: Zone = l.kind === 'housing' ? 'res' : lineNoise(l) >= 0.4 ? 'work' : 'centre';
-    const ok = (x: number, z: number) => clearAt(world, x, z, rr) && walkCost(world, x, z) < 150;
-    let lot = findLot(world, zone, rr, ok);
-    if (!lot && extendStreets(world, zone)) lot = findLot(world, zone, rr, ok);
+    const fr = MODEL_FRONT[FIELD_LINES[l.id] ? `farmstead-${l.tiers[0].era}` : model] || rr * 0.5;
+    const ok = (x: number, z: number) => lotOk(world, x, z, rr, fr);
+    let lot = findLot(world, zone, rr, fr, ok);
+    // No lot free: lay another street (in a town, the next street of the grid) and look again.
+    // (A town lays at most two new streets a day: streets follow the houses, not the other way round.)
+    const today = calendar(world.clock.totalSeconds).dayIndex;
+    if (world.streetDay !== today) {
+      world.streetDay = today;
+      world.streetsToday = 0;
+    }
+    for (let k = 0; !lot && k < 2 && world.streetsToday < 2; k++) {
+      world.streetsToday++;
+      if (!(world.plan.grid ? gridExtend(world, zone, (s) => !!s.old, (s) => demolish(world, s, 'to make way for a new street')) : extendStreets(world, zone))) break;
+      lot = findLot(world, zone, rr, fr, ok);
+    }
+    // In a town everything in the middle stands on the grid: wait for a lot rather than scatter.
+    if (!lot && world.plan.grid) return null;
     if (lot) return { x: lot.x, z: lot.z, rot: lot.rot, hex: hexKey(worldToHexLocal(lot.x, lot.z)) };
   }
   const camp = world.camp.center;
@@ -460,6 +511,9 @@ export function planTown(world: World, needs: Record<string, number>, dt: number
     foundPlan(world);
     if (world.plan) logEvent(world, 'The village laid out its first street, with lanes to its workings: homes to one side, workshops to the other.');
   }
+  // When the people learn to build real houses they raise a temple to their god and lay
+  // the town out round it: a square, straight streets, houses in rows.
+  if (!world.plan?.grid && world.villagers.length >= 20 && bestTier(world, LINE_BY_ID.get('housing')!) >= 2) foundTownProper(world);
   const sites = world.structures.filter(underConstruction).length;
   if (sites >= maxSites(world)) return;
 
@@ -468,7 +522,10 @@ export function planTown(world: World, needs: Record<string, number>, dt: number
   const homeTier = bestTier(world, housing);
   // Build ahead of need so newcomers have somewhere to sleep.
   const homesGoingUp = world.structures.filter((s) => s.line === 'housing' && underConstruction(s) && s.tier < 0).length;
-  if (homeTier >= 0 && canSupply(world, housing.tiers[homeTier]) && world.villagers.length >= housingCapacity(world) - 2 && homesGoingUp < 1 + Math.floor(world.villagers.length / 15)) {
+  // In a town only proper houses on the grid count: the old huts are being replaced.
+  const town = !!world.plan?.grid;
+  const beds = town ? world.structures.reduce((n, s) => n + (s.line === 'housing' && !s.old ? housing.tiers[Math.max(s.tier, s.target)].housing ?? 0 : 0), 0) : housingCapacity(world);
+  if (homeTier >= 0 && canSupply(world, housing.tiers[homeTier]) && world.villagers.length >= beds - 2 && homesGoingUp < 1 + Math.floor(world.villagers.length / 15)) {
     if (place(world, housing, homeTier)) return;
   }
 
@@ -477,6 +534,16 @@ export function planTown(world: World, needs: Record<string, number>, dt: number
   for (const s of order) {
     if (underConstruction(s)) continue;
     const best = bestTier(world, lineOf(s));
+    // The old camp is not improved where it stands: its homes are replaced by houses on
+    // the streets, and its workshops move to a lot when they are next rebuilt.
+    if (town && s.old && s.line === 'housing') continue;
+    if (town && s.old && lineOf(s).site === 'camp' && s.line !== 'temple') {
+      if (best > s.tier && canSupply(world, lineOf(s).tiers[s.tier + 1]) && place(world, lineOf(s), s.tier + 1, needs)) {
+        demolish(world, s, 'and rebuilt on the new streets');
+        return;
+      }
+      continue;
+    }
     if (best > s.tier && canSupply(world, lineOf(s).tiers[s.tier + 1])) {
       s.target = s.tier + 1;
       s.progress = 0;
@@ -491,7 +558,8 @@ export function planTown(world: World, needs: Record<string, number>, dt: number
   //    busy one when more people want that work than it has places for.
   const picks: { l: Line; u: number; only?: string }[] = [];
   for (const l of LINES) {
-    if (l.kind === 'housing') continue;
+    // Homes are planned above; the temple is raised when the town is founded.
+    if (l.kind === 'housing' || l.id === 'temple') continue;
     if (bestTier(world, l) < 0 || !canSupply(world, l.tiers[0])) continue;
     const have = world.structures.filter((s) => s.line === l.id);
     let u: number;
@@ -566,7 +634,7 @@ function place(world: World, l: Line, tier: number, needs: Record<string, number
 export function supplySites(world: World): void {
   for (const s of [...world.structures]) {
     if (!underConstruction(s) || s.supplied) continue;
-    if (world.clock.totalSeconds - s.plannedAt > 3 * 1200) {
+    if (world.clock.totalSeconds - s.plannedAt > 3 * 1200 && s.line !== 'temple') {
       const name = lineOf(s).tiers[s.target].name.toLowerCase();
       if (s.tier < 0) world.structures.splice(world.structures.indexOf(s), 1);
       else s.target = s.tier;
@@ -595,12 +663,41 @@ export function buildWork(world: World, s: Structure, seconds: number, builder: 
   if (t.storage && !world.built.includes(t.storage)) world.built.push(t.storage);
   const owner = world.villagers.find((v) => v.id === s.owner);
   logEvent(world, `${builder.name} finished the ${t.name.toLowerCase()}${owner ? `, run by ${owner.name}` : ''}.`);
+  if (s.line === 'temple') logEvent(world, s.tier === 0 ? 'The first temple to you stands finished at the heart of the town.' : `Your temple was rebuilt as a ${t.name.toLowerCase()}.`);
   if (s.field && !s.field.planted) {
     if (s.field.clear.length) logEvent(world, `The ${t.name.toLowerCase()} is fenced: ${s.field.clear.length} trees, bushes and rocks must be cleared before planting.`);
     else plantField(world, s);
   }
   if (lineOf(s).kind === 'acquisition' && t.facilities.some((f) => ['pasture', 'pigsty', 'chicken-coop', 'cattle-pasture'].includes(f))) startHerd(world, s);
   return true;
+}
+
+/** The town proper: a temple to the god, a square round it, and a grid of streets to build along. */
+function foundTownProper(world: World): void {
+  const temple = LINE_BY_ID.get('temple')!;
+  const tier = bestTier(world, temple);
+  if (tier < 0 || world.structures.some((s) => s.line === 'temple')) return;
+  const g = pickTownSite(world);
+  if (!g) return;
+  // Everything in the middle of the old camp is now old; the square is cleared.
+  for (const s of world.structures) if (s.line === 'housing' || lineOf(s).site === 'camp') s.old = true;
+  for (const s of [...world.structures]) if (Math.max(Math.abs((s.x - g.x) * g.ux + (s.z - g.z) * g.uz), Math.abs(-(s.x - g.x) * g.uz + (s.z - g.z) * g.ux)) < BLOCK / 2 + radiusOf(s) + 2) demolish(world, s, 'to clear the temple square');
+  layGrid(world, g);
+  // The temple faces the old camp, square to the grid.
+  const fx = world.camp.fire.x - g.x;
+  const fz = world.camp.fire.z - g.z;
+  const along = fx * g.ux + fz * g.uz;
+  const across = -fx * g.uz + fz * g.ux;
+  const [dx, dz] = Math.abs(along) >= Math.abs(across) ? [g.ux * Math.sign(along || 1), g.uz * Math.sign(along || 1)] : [-g.uz * Math.sign(across || 1), g.ux * Math.sign(across || 1)];
+  clearSite(world, g.x, g.z, footprint(temple.tiers[tier].model) + 2);
+  const s: Structure = {
+    id: world.nextStructureId++, line: 'temple', tier: -1, target: tier, progress: 0, supplied: false, x: g.x, z: g.z, rot: Math.atan2(dx, dz),
+    hex: hexKey(worldToHexLocal(g.x, g.z)), variant: 0, owner: null, animals: 0, plannedAt: world.clock.totalSeconds,
+  };
+  world.structures.push(s);
+  world.structuresVersion++;
+  for (const o of world.structures) connectLane(world, o);
+  logEvent(world, 'The people chose ground for a temple to you, and laid out a town round it: a square, straight streets, and lots for houses in rows.');
 }
 
 /** A cleared field is planted (or stocked) and starts to yield. */
@@ -622,7 +719,7 @@ export function rebuildObstacles(world: World): void {
   world.nav.obstacle.fill(1);
   for (const s of world.structures) {
     const l = lineOf(s);
-    if (l.kind !== 'port' && !l.id.includes('bridge')) world.nav.setBuilding(s.x, s.z, radiusOf(s) * 0.62);
+    if (l.kind !== 'port' && !l.id.includes('bridge')) world.nav.setBuilding(s.x, s.z, Math.max(frontOf(s) - 0.6, radiusOf(s) * 0.45));
     if (s.field) stampField(world, s.field);
   }
 }
@@ -668,6 +765,8 @@ export function dailyTown(world: World, food: number, needs: Record<string, numb
   resizeFields(world, needs, onStreet(world), (text) => logEvent(world, text));
   homeLife(world);
   goodsLife(world);
+  // A temple at the heart of the town lifts everyone a little.
+  if (world.structures.some((s) => s.line === 'temple' && s.tier >= 0)) for (const v of world.villagers) v.fulfilment = Math.min(1, v.fulfilment + 0.01);
   const people = world.villagers.length;
   const happy = world.villagers.reduce((a, v) => a + v.fulfilment, 0) / Math.max(1, people);
   const room = housingCapacity(world) - people;
@@ -718,7 +817,7 @@ function homes(world: World): Structure[] {
 export function bedFor(world: World, v: Villager): { x: number; z: number } {
   const h = homeOf(world, v);
   if (!h) return { x: world.camp.fire.x + 2, z: world.camp.fire.z + 2 };
-  const out = radiusOf(h) * 0.62 + 1;
+  const out = frontOf(h) + 0.9;
   return { x: h.x + Math.sin(h.rot) * out, z: h.z + Math.cos(h.rot) * out };
 }
 
@@ -735,7 +834,9 @@ function homeLife(world: World): void {
   const hs = homes(world).filter((s) => !underConstruction(s));
   const worst = hs[hs.length - 1];
   const best = bestTier(world, LINE_BY_ID.get('housing')!);
-  if (worst && hs.length > 1 && worst.tier < best && spare >= (tierOf(worst)!.housing ?? 0) + 2) {
+  const oldHome = world.plan?.grid ? hs.filter((s) => s.old).sort((a, b) => a.tier - b.tier)[0] : undefined;
+  if (oldHome && spare >= (tierOf(oldHome)!.housing ?? 0)) demolish(world, oldHome, 'now that there are houses on the streets');
+  else if (worst && hs.length > 1 && worst.tier < best && spare >= (tierOf(worst)!.housing ?? 0) + 2) {
     world.structures.splice(world.structures.indexOf(worst), 1);
     world.structuresVersion++;
     logEvent(world, `With room to spare, an old ${tierOf(worst)!.name.toLowerCase()} was taken down.`);

@@ -7,7 +7,7 @@ import type { World } from './world';
 import { buildWorld } from './worldgen';
 import { NavGrid } from './pathfinding';
 
-export const SAVE_VERSION = 9;
+export const SAVE_VERSION = 10;
 
 export interface SaveFile {
   version: number;
@@ -112,6 +112,9 @@ export function loadWorld(save: SaveFile): World {
     cleared: [...(save.cleared ?? [])],
     streets: clone(save.streets ?? []),
     plan: clone(save.plan ?? null),
+    streetDay: -1,
+    streetsToday: 0,
+    nextChain: (save.streets ?? []).reduce((m, s) => Math.max(m, s.chain ?? 0), 0) + 1,
     ...save.town,
     structuresVersion: 1,
     obstacleVersion: -1,

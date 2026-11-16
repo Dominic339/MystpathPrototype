@@ -82,6 +82,14 @@ export const LINES: readonly Line[] = [
   ]),
 
   // ---------------------------------------------------------------- Food storage
+  // ---------------------------------------------------------------- The temple
+  // Raised to the god when the people first build real houses; the town is laid out round it.
+  line('temple', 'Temple', 'civic', 'camp', 'builder', [
+    t('iron', 'Timber temple', ['timber-framing'], { lumber: 24, 'cut-stone': 10, reeds: 20 }, 1200, 'temple-timber', { workers: 1 }),
+    t('medieval', 'Stone temple', ['masonry'], { 'cut-stone': 40, planks: 20 }, 1800, 'temple-stone', { workers: 1 }),
+    t('renaissance', 'Great temple', ['brickwork'], { bricks: 60, 'cut-stone': 30, glass: 12 }, 2400, 'temple-great', { workers: 2 }),
+    t('techno-magic', 'Spire of the god', ['arcane-engineering'], { 'mana-cell': 10, glass: 40, 'iron-ingot': 40 }, 3000, 'temple-spire', { workers: 2 }),
+  ]),
   line('food-store', 'Food store', 'storage', 'camp', 'digger', [
     t('stone', 'Storage pits', ['storage-pits'], { reeds: 6, 'stone-tools': 1 }, 400, 'storage-pits', { storage: 'storage-pits', workers: 0 }),
     t('iron', 'Root cellar', ['root-cellar'], { 'cut-stone': 12, lumber: 8 }, 900, 'root-cellar', { storage: 'root-cellar', workers: 0 }),
